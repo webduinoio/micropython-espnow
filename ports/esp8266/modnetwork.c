@@ -410,6 +410,10 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                         wifi_set_phy_mode(mp_obj_get_int(kwargs->table[i].value));
                         break;
                     }
+                    case MP_QSTR_pm: {
+                        wifi_set_sleep_type(mp_obj_get_int(kwargs->table[i].value));
+                        break;
+                    }
                     default:
                         goto unknown;
                 }
@@ -481,6 +485,10 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
             val = mp_obj_new_int(wifi_get_phy_mode());
             break;
         }
+        case MP_QSTR_pm: {
+            val = MP_OBJ_NEW_SMALL_INT(wifi_get_sleep_type());
+            break;
+        }
         default:
             goto unknown;
     }
@@ -506,6 +514,12 @@ STATIC const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_isconnected), MP_ROM_PTR(&esp_isconnected_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&esp_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_ifconfig), MP_ROM_PTR(&esp_ifconfig_obj) },
+
+    // Constants
+    { MP_ROM_QSTR(MP_QSTR_PM_NONE), MP_ROM_INT(NONE_SLEEP_T) },
+    { MP_ROM_QSTR(MP_QSTR_PM_MIN_MODEM), MP_ROM_INT(MODEM_SLEEP_T) },
+    { MP_ROM_QSTR(MP_QSTR_PM_MAX_MODEM), MP_ROM_INT(MODEM_SLEEP_T) },
+    { MP_ROM_QSTR(MP_QSTR_PM_LIGHT_SLEEP), MP_ROM_INT(LIGHT_SLEEP_T) },
 };
 
 STATIC MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
