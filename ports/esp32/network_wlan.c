@@ -51,7 +51,7 @@ STATIC const wlan_if_obj_t wlan_sta_obj;
 STATIC const wlan_if_obj_t wlan_ap_obj;
 
 // Set to "true" if esp_wifi_start() was called
-static bool wifi_started = false;
+bool wifi_started = false;
 
 // Set to "true" if the STA interface is requested to be connected by the
 // user, used for automatic reassociation.
@@ -415,8 +415,11 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         esp_exceptions(esp_wifi_set_mac(self->if_id, bufinfo.buf));
                         break;
                     }
-                    case MP_QSTR_ssid:
-                    case MP_QSTR_essid: {
+                    case MP_QSTR_protocol: {
+                        esp_exceptions(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
+                        break;
+                    }
+                    case MP_QSTR_ssid: {
                         req_if = WIFI_IF_AP;
                         size_t len;
                         const char *s = mp_obj_str_get_data(kwargs->table[i].value, &len);
@@ -530,8 +533,13 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                     goto unknown;
             }
         }
+        case MP_QSTR_protocol: {
+            uint8_t protocol_bitmap;
+            esp_exceptions(esp_wifi_get_protocol(self->if_id, &protocol_bitmap));
+            val = MP_OBJ_NEW_SMALL_INT(protocol_bitmap);
+            break;
+        }
         case MP_QSTR_ssid:
-        case MP_QSTR_essid:
             switch (self->if_id) {
                 case WIFI_IF_STA:
                     val = mp_obj_new_str((char *)cfg.sta.ssid, strlen((char *)cfg.sta.ssid));
