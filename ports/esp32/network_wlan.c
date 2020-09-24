@@ -161,16 +161,20 @@ STATIC void require_if(mp_obj_t wlan_if, int if_no) {
     }
 }
 
-STATIC mp_obj_t get_wlan(size_t n_args, const mp_obj_t *args) {
-    static int initialized = 0;
-    if (!initialized) {
+void esp_initialise_wifi() {
+    static int wifi_initialized = 0;
+    if (!wifi_initialized) {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_LOGD("modnetwork", "Initializing WiFi");
         esp_exceptions(esp_wifi_init(&cfg));
         esp_exceptions(esp_wifi_set_storage(WIFI_STORAGE_RAM));
         ESP_LOGD("modnetwork", "Initialized");
-        initialized = 1;
+        wifi_initialized = 1;
     }
+}
+
+STATIC mp_obj_t get_wlan(size_t n_args, const mp_obj_t *args) {
+    esp_initialise_wifi();
 
     int idx = (n_args > 0) ? mp_obj_get_int(args[0]) : WIFI_IF_STA;
     if (idx == WIFI_IF_STA) {
@@ -493,6 +497,10 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         esp_exceptions(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
+                    case MP_QSTR_pm: {
+                        esp_exceptions(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
+                        break;
+                    }
                     default:
                         goto unknown;
                 }
@@ -587,6 +595,12 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
             val = MP_OBJ_NEW_SMALL_INT(protocol_bitmap);
             break;
         }
+        case MP_QSTR_pm: {
+            wifi_ps_type_t ps_type;
+            esp_exceptions(esp_wifi_get_ps(&ps_type));
+            val = MP_OBJ_NEW_SMALL_INT(ps_type);
+            break;
+        }
         default:
             goto unknown;
     }
@@ -612,6 +626,11 @@ STATIC const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_isconnected), MP_ROM_PTR(&network_wlan_isconnected_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&network_wlan_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_ifconfig), MP_ROM_PTR(&esp_ifconfig_obj) },
+
+    // Constants
+    { MP_ROM_QSTR(MP_QSTR_PM_NONE), MP_ROM_INT(WIFI_PS_NONE) },
+    { MP_ROM_QSTR(MP_QSTR_PM_MIN_MODEM), MP_ROM_INT(WIFI_PS_MIN_MODEM) },
+    { MP_ROM_QSTR(MP_QSTR_PM_MAX_MODEM), MP_ROM_INT(WIFI_PS_MAX_MODEM) },
 };
 STATIC MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
 
