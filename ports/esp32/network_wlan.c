@@ -51,7 +51,7 @@ STATIC const wlan_if_obj_t wlan_sta_obj;
 STATIC const wlan_if_obj_t wlan_ap_obj;
 
 // Set to "true" if esp_wifi_start() was called
-bool wifi_started = false;
+static bool wifi_started = false;
 
 // Set to "true" if the STA interface is requested to be connected by the
 // user, used for automatic reassociation.
@@ -161,16 +161,20 @@ STATIC void require_if(mp_obj_t wlan_if, int if_no) {
     }
 }
 
-STATIC mp_obj_t get_wlan(size_t n_args, const mp_obj_t *args) {
-    static int initialized = 0;
-    if (!initialized) {
+void esp_initialise_wifi() {
+    static int wifi_initialized = 0;
+    if (!wifi_initialized) {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_LOGD("modnetwork", "Initializing WiFi");
         esp_exceptions(esp_wifi_init(&cfg));
         esp_exceptions(esp_wifi_set_storage(WIFI_STORAGE_RAM));
         ESP_LOGD("modnetwork", "Initialized");
-        initialized = 1;
+        wifi_initialized = 1;
     }
+}
+
+STATIC mp_obj_t get_wlan(size_t n_args, const mp_obj_t *args) {
+    esp_initialise_wifi();
 
     int idx = (n_args > 0) ? mp_obj_get_int(args[0]) : WIFI_IF_STA;
     if (idx == WIFI_IF_STA) {
@@ -415,10 +419,6 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         esp_exceptions(esp_wifi_set_mac(self->if_id, bufinfo.buf));
                         break;
                     }
-                    case MP_QSTR_protocol: {
-                        esp_exceptions(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
-                        break;
-                    }
                     case MP_QSTR_ssid: {
                         req_if = WIFI_IF_AP;
                         size_t len;
@@ -532,12 +532,6 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                 default:
                     goto unknown;
             }
-        }
-        case MP_QSTR_protocol: {
-            uint8_t protocol_bitmap;
-            esp_exceptions(esp_wifi_get_protocol(self->if_id, &protocol_bitmap));
-            val = MP_OBJ_NEW_SMALL_INT(protocol_bitmap);
-            break;
         }
         case MP_QSTR_ssid:
             switch (self->if_id) {
