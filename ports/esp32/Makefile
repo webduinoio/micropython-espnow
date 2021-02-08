@@ -115,6 +115,12 @@ $(info Add the xtensa toolchain to your PATH. See README.md)
 $(error C compiler missing)
 endif
 
+# Support ESPNOW by default on the ESP32
+MICROPY_ESPNOW ?= 1
+ifeq ($(MICROPY_ESPNOW),1)
+CFLAGS_MOD += -DMICROPY_ESPNOW=1
+endif
+
 # Support BLE by default.
 # Can be explicitly disabled on the command line or board config.
 MICROPY_PY_BLUETOOTH ?= 1
@@ -343,8 +349,6 @@ SRC_C = \
 	modesp.c \
 	esp32_partition.c \
 	esp32_rmt.c \
-	esp_espnow.c \
-	ring_buffer.c \
 	esp32_ulp.c \
 	modesp32.c \
 	espneopixel.c \
@@ -355,6 +359,12 @@ SRC_C = \
 	machine_sdcard.c \
 	$(wildcard $(BOARD_DIR)/*.c) \
 	$(SRC_MOD)
+
+ifeq ($(MICROPY_ESPNOW),1)
+SRC_C += \
+	esp_espnow.c \
+	ring_buffer.c
+endif
 
 SRC_CXX += \
 	$(SRC_MOD_CXX)
@@ -765,11 +775,14 @@ APP_LD_ARGS += $(LIBC_LIBM)
 ifeq ($(ESPIDF_CURHASH),$(ESPIDF_SUPHASH_V4))
 APP_LD_ARGS += -L$(ESPCOMP)/xtensa/esp32 -lhal
 APP_LD_ARGS += -L$(ESPCOMP)/bt/controller/lib -lbtdm_app
-APP_LD_ARGS += -L$(ESPCOMP)/esp_wifi/lib_esp32 -lcore -lmesh -lnet80211 -lphy -lrtc -lpp -lsmartconfig -lcoexist -lespnow
+APP_LD_ARGS += -L$(ESPCOMP)/esp_wifi/lib_esp32 -lcore -lmesh -lnet80211 -lphy -lrtc -lpp -lsmartconfig -lcoexist
 else
 APP_LD_ARGS += $(ESPCOMP)/esp32/libhal.a
 APP_LD_ARGS += -L$(ESPCOMP)/bt/lib -lbtdm_app
-APP_LD_ARGS += -L$(ESPCOMP)/esp32/lib -lcore -lmesh -lnet80211 -lphy -lrtc -lpp -lwpa -lsmartconfig -lcoexist -lwps -lwpa2 -lespnow
+APP_LD_ARGS += -L$(ESPCOMP)/esp32/lib -lcore -lmesh -lnet80211 -lphy -lrtc -lpp -lwpa -lsmartconfig -lcoexist -lwps -lwpa2
+endif
+ifeq ($(MICROPY_ESPNOW),1)
+APP_LD_ARGS += -lespnow
 endif
 APP_LD_ARGS += $(OBJ)
 APP_LD_ARGS += $(LIB)
