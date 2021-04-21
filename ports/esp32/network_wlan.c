@@ -420,6 +420,10 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         ESP_EXCEPTIONS(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
+                    case QS(MP_QSTR_power): {
+                        ESP_EXCEPTIONS(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
+                        break;
+                    }
                     case QS(MP_QSTR_essid): {
                         req_if = WIFI_IF_AP;
                         size_t len;
@@ -507,6 +511,12 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                 default:
                     goto unknown;
             }
+        }
+        case QS(MP_QSTR_power): {
+            wifi_ps_type_t ps_type;
+            ESP_EXCEPTIONS(esp_wifi_get_ps(&ps_type));
+            val = MP_OBJ_NEW_SMALL_INT(ps_type);
+            break;
         }
         case QS(MP_QSTR_protocol): {
             uint8_t protocol_bitmap;
