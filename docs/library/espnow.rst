@@ -157,8 +157,8 @@ For example::
 
     Send the data contained in ``msg`` to the peer with given network ``mac``
     address. In the second form, ``mac=None`` and ``sync=True``. The peer must
-    be registered with `ESPNow.add_peer()<ESPNow.add_peer()>` (see below)
-    before the message can be sent.
+    be registered with `ESPNow.add_peer()<ESPNow.add_peer()>` before the
+    message can be sent.
 
     Arguments:
 
@@ -183,7 +183,7 @@ For example::
     regardless of whether it has initialised it's ESP-Now system or is
     actively listening for ESP-Now traffic (see the Espressif ESP-Now docs).
 
-    **Note**: See **Exceptions** below for a description of the exceptions
+    **Note**: See `Exceptions`_ below for a description of the exceptions
     which may be raised.
 
 .. method:: ESPNow.recv([timeout]) (ESP32 only)
@@ -322,9 +322,9 @@ The Esspresif ESP-Now software requires that other devices (peers) must be
     **ESP8266**: Keyword args may not be used on the ESP8266.
 
     **Note**: Managing peers can become complex on the ESP32/8266 if you are
-    using more than just the STA_IF interface. The ESP32/8266 effectively has two
-    independent wifi interfaces (STA_IF and AP_IF) and each has their own MAC
-    address. You must:
+    using more than just the STA_IF interface. The ESP32/8266 effectively has
+    two **apparently** independent wifi interfaces (STA_IF and AP_IF) and each
+    has their own MAC address (see `ESPNow and Wifi`_ below). You must:
 
     - choose the correct MAC address of the remote peer (STA_IF or AP_IF) to
       register,
@@ -571,3 +571,102 @@ Other issues to take care with when using ESPNow with wifi are:
   at all, other than by connecting to an Access Point (This seems to be fixed
   in IDF 4+). Micropython versions without the ESPNow patches also disallow
   setting the channel of the STA_IF.
+
+ESPNow and Sleep Modes
+----------------------
+
+The ``machine.lightsleep([time_ms])`` and ``machine.deepsleep([time_ms])``
+functions can be used to put the ESP32 and periperals (including the WiFi and
+Bluetooth radios) to sleep. This is useful in many applications to conserve
+battery power (see :doc:`machine`). However, applications must disable the
+Wifi peripheral (using ``active(False)``) before entering light or deep
+sleep (see `Sleep Modes <https://docs.espressif.com/
+projects/esp-idf/en/latest/esp32/api-reference/system/sleep_modes.html>`_).
+Otherwise the WiFi radio may not be initialised properly after wake from
+sleep. If the ``STA_IF`` and ``AP_IF`` interfaces have both been set
+``active(True)`` then both interfaces should be set ``active(False)`` before
+entering any sleep mode.
+
+**Example:** deep sleep::
+
+  import network
+  import machine
+  from esp import espnow
+
+  peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
+  e = espnow.ESPNow()
+  e.init()
+
+  w0 = network.WLAN(network.STA_IF)
+  w0.active(True)
+  e.add_peer(peer)                       # Register peer on STA_IF
+
+  print('Sending ping...')
+  if not e.send(peer, b'ping'):
+    print('Ping failed!')
+
+  e.deinit()
+  w0.active(False)                       # Disable the wifi before sleep
+
+  print('Going to sleep...')
+  machine.deepsleep(10000)               # Sleep for 10 seconds then reboot
+
+**Example:** light sleep::
+
+  import network
+  import machine
+  from esp import espnow
+
+  peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
+  e = espnow.ESPNow()
+  e.init()
+
+  w0 = network.WLAN(network.STA_IF)
+  w0.active(True)
+  w0.config(channel=6)
+  e.add_peer(peer)                       # Register peer on STA_IF
+
+  while True:
+    print('Sending ping...')
+    if not e.send(peer, b'ping'):
+      print('Ping failed!')
+
+    w0.active(False)                     # Disable the wifi before sleep
+
+    print('Going to sleep...')
+    machine.lightsleep(10000)            # Sleep for 10 seconds
+
+    w0.active(True)
+    w0.config(channel=6)                 # Wifi loses config after lightsleep()
+
+Notes on using on_recv callbacks
+--------------------------------
+
+The `ESPNow.config(on_recv=callback)<ESPNow.config()>` callback method is a
+convenient and responsive way of processing incoming espnow messages,
+especially if the data rate is moderate and the device is *not too busy* but
+there are some caveats:
+
+- The scheduler stack *can* easily overflow and callbacks will be missed if
+  packets are arriving at a sufficient rate. It is a good idea to readout all
+  available packets in the callback in case a prior callback has been missed,
+  eg::
+
+    def recv_cb2(e):
+        while e.poll():
+            print(e.irecv(0))
+    e.config(on_recv=recv_cb2)
+
+- Message callbacks may still be missed if the scheduler stack is
+  overflowed by other micropython components (eg, bluetooth,
+  machine.Pin.irq(), machine.timer, i2s, ...). Generally, this method may be
+  less reliable for dealing with intense bursts of messages, or high
+  throughput or on a device which is very busy dealing with other hardware
+  operations.
+
+- Take care if reading out messages with `irecv()` in the normal micropython
+  control flow *and* in ``on_recv`` callbacks, as the memory returned by
+  `irecv()` is shared.
+
+- For more information on *scheduling* function callbacks see:
+  `micropython.schedule()<micropython.schedule>`.

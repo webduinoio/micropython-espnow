@@ -63,14 +63,6 @@
 #define ESP_NOW_MAX_TOTAL_PEER_NUM (20)
 #define ESP_NOW_MAX_ENCRYPT_PEER_NUM (6)
 typedef int esp_err_t;
-// Make our own for the esp8266
-typedef struct esp_now_peer_info {
-    uint8_t peer_addr[ESP_NOW_ETH_ALEN];
-    uint8_t lmk[ESP_NOW_KEY_LEN];
-    uint8_t channel;
-    uint8_t ifidx;
-    bool encrypt;
-} esp_now_peer_info_t;
 
 static const uint8_t ESPNOW_MAGIC = 0x99;
 

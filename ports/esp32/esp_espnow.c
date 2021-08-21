@@ -82,8 +82,8 @@ typedef struct _esp_espnow_obj_t {
     buffer_t recv_buffer;           // A buffer for received packets
     mp_obj_tuple_t *none_tuple;     // Preallocated tuple for irecv()
     mp_obj_tuple_t *irecv_tuple;    // Preallocated tuple for irecv()
-    mp_obj_array_t *irecv_peer;
-    mp_obj_array_t *irecv_msg;
+    mp_obj_array_t *irecv_peer;     // Storage for mac address in irecv tuple
+    mp_obj_array_t *irecv_msg;      // Storage for the msg in the irecv tuple
     int initialised;
     size_t recv_buffer_size;
     size_t sent_packets;            // Count of sent packets
@@ -93,6 +93,7 @@ typedef struct _esp_espnow_obj_t {
     volatile size_t sent_responses; // # of sent packet responses received
     volatile size_t sent_failures;  // # of sent packet responses failed
     size_t peer_count;              // Cache the number of peers
+    mp_obj_t recv_cb;               // Callback when a packet is received
 } esp_espnow_obj_t;
 
 // Initialised below.
@@ -154,6 +155,7 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
     self->irecv_tuple->items[1] = MP_OBJ_FROM_PTR(self->irecv_msg);
     mp_obj_t items[] = {mp_const_none, mp_const_none};
     self->none_tuple = mp_obj_new_tuple(2, items);
+    self->recv_cb = mp_const_none;
 
     // Set the global singleton pointer for the espnow protocol.
     MP_STATE_PORT(espnow_singleton) = self;
@@ -221,11 +223,12 @@ STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     esp_espnow_obj_t *self = MP_STATE_PORT(espnow_singleton);
-    enum { ARG_get, ARG_rxbuf, ARG_timeout };
+    enum { ARG_get, ARG_rxbuf, ARG_timeout, ARG_on_recv };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_get, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_rxbuf, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_on_recv, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args,
@@ -236,6 +239,9 @@ STATIC mp_obj_t espnow_config(
     }
     if (args[ARG_timeout].u_int >= 0) {
         self->recv_timeout = args[ARG_timeout].u_int;
+    }
+    if (args[ARG_on_recv].u_obj != MP_OBJ_NULL) {
+        self->recv_cb = args[ARG_on_recv].u_obj;
     }
     if (args[ARG_get].u_obj == MP_OBJ_NULL) {
         return mp_const_none;
@@ -249,6 +255,8 @@ STATIC mp_obj_t espnow_config(
                                 : self->recv_buffer_size));
     } else if (name == QS(MP_QSTR_timeout)) {
         return mp_obj_new_int(self->recv_timeout);
+    } else if (name == QS(MP_QSTR_on_recv)) {
+        return self->recv_cb;
     } else {
         mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
     }
@@ -308,6 +316,8 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_version_obj, espnow_version);
 // ### The ESP_Now send and recv callback routines
 //
 
+
+
 // Triggered when receipt of a sent packet is acknowledged (or not)
 // Just count number of responses and number of successes
 STATIC void IRAM_ATTR send_cb(
@@ -330,6 +340,9 @@ STATIC void IRAM_ATTR recv_cb(
     }
     _buf_put_recv_data(self->recv_buffer, mac_addr, msg, msg_len);
     self->recv_packets++;
+    if (self->recv_cb != mp_const_none) {
+        mp_sched_schedule(self->recv_cb, self);
+    }
 }
 
 // ### Send and Receive ESP_Now data
@@ -542,7 +555,7 @@ STATIC bool _update_peer_info(
         { MP_QSTR_lmk, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_channel, MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_ifidx, MP_ARG_INT, {.u_int = -1} },
-        { MP_QSTR_encrypt, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_encrypt, MP_ARG_BOOL, {.u_bool = MP_OBJ_NULL} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args, pos_args, kw_args,
@@ -564,7 +577,7 @@ STATIC bool _update_peer_info(
         peer->ifidx = args[ARG_ifidx].u_int;
     }
     if (args[ARG_encrypt].u_obj != MP_OBJ_NULL) {
-        peer->encrypt = mp_obj_is_true(args[ARG_encrypt].u_obj);
+        peer->encrypt = args[ARG_encrypt].u_bool;
     }
     return true;
 }
