@@ -266,25 +266,6 @@ STATIC mp_obj_t espnow_config(
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_config_obj, 1, espnow_config);
 
-// ESPNow.clear(True): Clear out any data in the recv buffer.
-// Require arg==True as check against inadvertent use.
-// If arg != True, print the current buffer state.
-// Warning: Discards all data in the buffers. Use this to recovery from
-// buffer errors (*should* not happen).
-STATIC mp_obj_t espnow_clear(const mp_obj_t _, const mp_obj_t arg) {
-    esp_espnow_obj_t *self = MP_STATE_PORT(espnow_singleton);
-
-    buffer_print("Resp", self->recv_buffer);
-    if (arg != mp_const_true) {
-        mp_raise_ValueError(MP_ERROR_TEXT("arg must be True"));
-    }
-    buffer_flush(self->recv_buffer);
-    buffer_print("Resp", self->recv_buffer);
-    self->sent_packets = self->sent_responses;
-    return mp_const_none;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_clear_obj, espnow_clear);
-
 // ESPnow.stats(): Report
 STATIC mp_obj_t espnow_stats(mp_obj_t _) {
     const esp_espnow_obj_t *self = MP_STATE_PORT(espnow_singleton);
@@ -315,8 +296,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_version_obj, espnow_version);
 
 // ### The ESP_Now send and recv callback routines
 //
-
-
 
 // Triggered when receipt of a sent packet is acknowledged (or not)
 // Just count number of responses and number of successes
@@ -834,7 +813,6 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&espnow_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&espnow_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&espnow_config_obj) },
-    { MP_ROM_QSTR(MP_QSTR_clear), MP_ROM_PTR(&espnow_clear_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&espnow_stats_obj) },
     { MP_ROM_QSTR(MP_QSTR_recv), MP_ROM_PTR(&espnow_recv_obj) },
     { MP_ROM_QSTR(MP_QSTR_irecv), MP_ROM_PTR(&espnow_irecv_obj) },

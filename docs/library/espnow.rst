@@ -139,6 +139,9 @@ Configuration
 
 .. method:: ESPNow.clear(True) (ESP32 only)
 
+    **Note:** Deprecated after v1.17 - just use ``deinit()/init()`` if a buffer
+    error occurs.
+
     Clear out any data in the recv buffer. Use this to clean
     up after receiving a ``Buffer error`` (should not happen). All data in the
     buffers will be discarded. An arg of `True` is required to guard against
