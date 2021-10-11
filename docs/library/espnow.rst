@@ -121,7 +121,7 @@ Configuration
       or expect bursty incoming traffic.
 
       **Note:** The recv buffer is allocated by `ESPNow.init()`. Changing
-      these values will have no effect until the next call of `ESPNow.init()`.
+      this value will have no effect until the next call of `ESPNow.init()`.
 
     - ``timeout``: *(default=300,000)* Default read timeout (in milliseconds).
       The timeout can also be provided as arg to `recv()` and `irecv()`.
@@ -571,8 +571,8 @@ also connected to a wifi network:
   e.init()
 
   w0 = network.WLAN(network.STA_IF)
+  w0.active(True)                        # Set channel will fail unless Active
   w0.config(channel=6)
-  w0.active(True)
   w0.connect('myssid', 'myppassword')
 
   w1 = network.WLAN(network.AP_IF)
@@ -655,7 +655,7 @@ entering any sleep mode.
   e.init()
 
   w0 = network.WLAN(network.STA_IF)
-  w0.active(True)
+  w0.active(True)                        # Set channel will fail unless Active
   w0.config(channel=6)
   e.add_peer(peer)                       # Register peer on STA_IF
 
