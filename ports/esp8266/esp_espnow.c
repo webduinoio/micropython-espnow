@@ -321,6 +321,18 @@ STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     int n = self->sent_successes;
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(args[2], &bufinfo, MP_BUFFER_READ);
+
+    // Bugfix: esp_now_send() generates a panic if message buffer points
+    // to an address in ROM (eg. a statically interned QSTR).
+    // See https://github.com/glenn20/micropython-espnow-images/issues/7
+    // Fix: if message is in ROM, copy to a temp buffer on the stack.
+    char temp[bufinfo.len];
+    byte *p = (byte *)bufinfo.buf;
+    if (p < MP_STATE_MEM(gc_pool_start) || MP_STATE_MEM(gc_pool_end) < p) {
+        // If buffer is not in GC pool copy from ROM to stack
+        memcpy(temp, bufinfo.buf, bufinfo.len);
+        bufinfo.buf = temp;
+    }
     check_esp_err(esp_now_send(
         _get_bytes_len(args[1], ESP_NOW_ETH_ALEN),
         bufinfo.buf, bufinfo.len));
