@@ -167,8 +167,8 @@ void esp_initialise_wifi() {
     if (!wifi_initialized) {
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_LOGD("modnetwork", "Initializing WiFi");
-        ESP_EXCEPTIONS(esp_wifi_init(&cfg));
-        ESP_EXCEPTIONS(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+        esp_exceptions(esp_wifi_init(&cfg));
+        esp_exceptions(esp_wifi_set_storage(WIFI_STORAGE_RAM));
         ESP_LOGD("modnetwork", "Initialized");
         wifi_initialized = 1;
     }
@@ -417,11 +417,11 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         break;
                     }
                     case QS(MP_QSTR_protocol): {
-                        ESP_EXCEPTIONS(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
+                        esp_exceptions(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
                     case QS(MP_QSTR_power): {
-                        ESP_EXCEPTIONS(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
+                        esp_exceptions(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
                     case QS(MP_QSTR_essid): {
@@ -514,13 +514,13 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
         }
         case QS(MP_QSTR_power): {
             wifi_ps_type_t ps_type;
-            ESP_EXCEPTIONS(esp_wifi_get_ps(&ps_type));
+            esp_exceptions(esp_wifi_get_ps(&ps_type));
             val = MP_OBJ_NEW_SMALL_INT(ps_type);
             break;
         }
         case QS(MP_QSTR_protocol): {
             uint8_t protocol_bitmap;
-            ESP_EXCEPTIONS(esp_wifi_get_protocol(self->if_id, &protocol_bitmap));
+            esp_exceptions(esp_wifi_get_protocol(self->if_id, &protocol_bitmap));
             val = MP_OBJ_NEW_SMALL_INT(protocol_bitmap);
             break;
         }
@@ -593,7 +593,7 @@ STATIC const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
 };
 STATIC MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
 
-STATIC const mp_obj_type_t wlan_if_type = {
+const mp_obj_type_t wlan_if_type = {
     { &mp_type_type },
     .name = MP_QSTR_WLAN,
     .locals_dict = (mp_obj_t)&wlan_if_locals_dict,
