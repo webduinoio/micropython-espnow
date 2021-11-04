@@ -4,13 +4,11 @@
 .. module:: espnow
     :synopsis: ESP-NOW wireless protocol support
 
-This module provides an interface to the
-`ESP-Now
+This module provides an interface to the `ESP-Now
 <https://docs.espressif.com/projects/esp-idf/en/v4.0.2/
-api-reference/network/esp_now.html>`_
-protocol provided by Espressif on ESP32 and ESP8266 devices. Some calls are only
-available on the ESP32 due to code size restrictions on the ESP8266 and
-differences in the Espressif API.
+api-reference/network/esp_now.html>`_ protocol provided by Espressif on ESP32
+and ESP8266 devices. Some calls are only available on the ESP32 due to code
+size restrictions on the ESP8266 and differences in the Espressif API.
 
 .. note::
   This module is still under development and its classes, functions, methods
@@ -364,7 +362,10 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
 .. method:: ESPNow.peer_count() (ESP32 only)
 
-    Return the number of peers which have been registered.
+    Return a tuple of ``(peer_num, encrypt_num)`` where:
+
+    - ``peer_num`` is the number of peers which are registered, and
+    - ``encrypt_num`` is the number of encrypted peers.
 
 .. method:: ESPNow.get_peers() (ESP32 only)
 
