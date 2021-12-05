@@ -16,6 +16,7 @@ Table of Contents:
     - `Configuration`_
     - `Sending and Receiving Data`_
     - `Peer Management`_
+    - `Wifi Signal Strength (RSSI)`_
     - `Exceptions`_
     - `Constants - (ESP32 Only)`_
     - `Iteration over ESPNow - (ESP32 Only)`_
@@ -46,6 +47,8 @@ It is especially useful for small IoT networks, latency sensitive or power
 sensitive applications (such as battery operated devices) and for long-range
 communication between devices (hundreds of metres).
 
+This module also support tracking the Wifi signal strength (RSSI) of peer
+devices.
 
 .. note::
   This module is still under development and its classes, functions, methods
@@ -275,19 +278,21 @@ For example::
       - ``(None, None)`` if ``timeout`` is reached before a message is
         received, or
 
-      - ``(mac, msg)``: a `callee-owned tuple` of `bytearray` where:
+      - ``(mac, msg)``: a `callee-owned tuple`, where:
 
-        - ``mac`` is the mac address of the sending device (peer) and
+        - ``mac`` is the MAC address of the sending device (peer) and
 
         - ``msg`` is the message/data sent from the peer.
 
-      **Note**: `irecv()` will return a `callee-owned tuple` of callee owned
-      bytearrays. That is, memory will be allocated once for the tuple and
-      bytearrays on invocation of `espnow.ESPNow()<ESPNow()>` and reused for
+      **Note**: Memory will be allocated once for the tuple and ``msg``
+      bytearray on invocation of `espnow.ESPNow()<ESPNow()>` and reused for
       subsequent calls to `irecv()<ESPNow.irecv()>`. You must make a copy of
-      ``mac`` and ``msg`` if you wish to retain them across calls to
-      ``irecv()``. This greatly reduces memory fragmentation compared to using
+      ``msg`` if you wish to retain the value across calls to ``irecv()``.
+      This greatly reduces memory fragmentation compared to using
       `recv()<ESPNow.recv()>`.
+
+      The ``mac`` values are always references to the ``peer`` addresses in
+      the **peer device table** (see `ESPNow.peers`).
 
     .. data:: Raises:
 
@@ -301,7 +306,7 @@ For example::
     **ESP32 only:** Use `irecv()` on the esp8266.
 
     As for `irecv()`, except that `recv()` will return a newly allocated tuple
-    of newly allocated byte strings.
+    of byte strings.
 
     .. data:: Returns:
 
@@ -313,8 +318,11 @@ For example::
 
       **Note**: repeatedly calling `recv()<ESPNow.recv()>` will exercise the
       micropython memory allocation as new storage is allocated for each new
-      message and tuple. Use `irecv()<ESPNow.irecv()>`
-      for a more memory-efficient option.
+      message and tuple. Use `irecv()<ESPNow.irecv()>` for a more
+      memory-efficient option.
+
+      The ``mac`` values are always references to the ``peer`` addresses in
+      the **peer device table** (see `ESPNow.peers()`).
 
 .. method:: ESPNow.poll() (ESP32 only)
 
@@ -465,11 +473,51 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     address. Parameters may be provided as positional or keyword arguments
     (see `ESPNow.add_peer()`).
 
+Wifi Signal Strength (RSSI)
+---------------------------
+
+The ESPnow module maintains a **peer device table** which contains the signal
+strength of the last received message for all known peers. The **peer device
+table** can be accessed using `ESPNow.peers` and can be used to track device
+proximity and identify *nearest neighbours* in a network of peer devices.
+
+.. data:: ESPNow.peers
+
+    A reference to the **peer device table**: a dict of known peer devices
+    and rssi values::
+
+        {peer: [rssi, time_ms], ...}
+
+    where:
+
+    - ``peer`` is the peer MAC address (as `bytes`);
+    - ``rssi`` is the wifi signal strength in dBm (-127 to 0) of the last
+      message received from the peer; and
+    - ``time_ms`` is the time the message was received (in milliseconds since
+      system boot - wraps every 6 days).
+
+    Example::
+
+      >>> e.peers
+      {b'\xaa\xaa\xaa\xaa\xaa\xaa': [-31, 18372],
+       b'\xbb\xbb\xbb\xbb\xbb\xbb': [-43, 12541]}
+
+    **Note**: the ``mac`` addresses returned by `recv()` and `irecv()` are
+    references to the ``peer`` key values in the **peer device table**.
+
+    **Note**: RSSI values of peers are only saved if the peer is already
+    registered in the **peer device table**. New peers are added to the table
+    when the first packet from the peer is processed by `ESPNow.irecv()` or
+    `ESPNow.recv()`. Initially, the table will have an entry for the peer like
+    ``{peer: [None, None]}`` until more messages arrive. So, RSSI values of the
+    first message(s) from unregistered peers will be lost (until the peer is
+    added to the table). RSSI values for subsequent messages will be recorded.
+
 Exceptions
 ----------
 
 If the underlying Espressif ESPNow software stack returns an error code,
-the micropython ESPNow module will throw an ``OSError(errnum, errstring)``
+the micropython ESPNow module will raise an ``OSError(errnum, errstring)``
 exception where ``errstring`` is set to the name of one of the error codes
 identified in the
 `Espressif ESP-Now docs
