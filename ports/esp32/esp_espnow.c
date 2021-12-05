@@ -113,7 +113,7 @@ const mp_obj_type_t esp_espnow_type;
 // Return a pointer to the ESPNow module singleton
 // If state == INITIALISED check the device has been initialised.
 // Raises OSError if not initialised and state == INITIALISED.
-static esp_espnow_obj_t *get_singleton(int state) {
+static esp_espnow_obj_t *_get_singleton(int state) {
     esp_espnow_obj_t *self = MP_STATE_PORT(espnow_singleton);
     // assert(self);
     if (state == INITIALISED && self->recv_buffer == NULL) {
@@ -177,7 +177,7 @@ STATIC void recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len);
 // allocate the recv data buffers.
 // Returns None.
 STATIC mp_obj_t espnow_init(mp_obj_t _) {
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     if (self->recv_buffer == NULL) {    // Already initialised
         self->recv_buffer = buffer_init(self->recv_buffer_size);
         self->recv_buffer_size = buffer_size(self->recv_buffer);
@@ -196,7 +196,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_init_obj, espnow_init);
 // Note: this function is called from main.c:mp_task() to cleanup before soft
 // reset, so cannot be declared STATIC and must guard against self == NULL;.
 mp_obj_t espnow_deinit(mp_obj_t _) {
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     if (self != NULL && self->recv_buffer != NULL) {
         check_esp_err(esp_now_unregister_recv_cb());
         check_esp_err(esp_now_unregister_send_cb());
@@ -218,7 +218,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_deinit_obj, espnow_deinit);
 STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     enum { ARG_get, ARG_rxbuf, ARG_timeout, ARG_on_recv };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_get, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
@@ -267,7 +267,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_config_obj, 1, espnow_config);
 // Returns a tuple of:
 //   (tx_pkts, tx_responses, tx_failures, rx_pkts, dropped_rx_pkts)
 STATIC mp_obj_t espnow_stats(mp_obj_t _) {
-    const esp_espnow_obj_t *self = get_singleton(0);
+    const esp_espnow_obj_t *self = _get_singleton(0);
     mp_obj_t items[] = {
         mp_obj_new_int(self->tx_packets),
         mp_obj_new_int(self->tx_responses),
@@ -295,7 +295,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_version_obj, espnow_version);
 STATIC void send_cb(
     const uint8_t *mac_addr, esp_now_send_status_t status) {
 
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     self->tx_responses++;
     if (status != ESP_NOW_SEND_SUCCESS) {
         self->tx_failures++;
@@ -310,7 +310,7 @@ STATIC void send_cb(
 STATIC void recv_cb(
     const uint8_t *mac_addr, const uint8_t *msg, int msg_len) {
 
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(self->recv_buffer)) {
         self->dropped_rx_pkts++;
         return;
@@ -377,7 +377,7 @@ static int _get_packet(
 // Default timeout is set with ESPNow.config(timeout=milliseconds).
 // Returns (None, None) on timeout.
 STATIC mp_obj_t espnow_irecv(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     size_t timeout_ms = (
         (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
@@ -401,7 +401,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_irecv_obj, 1, 2, espnow_irecv)
 // Default timeout is set with ESPNow.config(timeout=milliseconds).
 // Return (None, None) on timeout.
 STATIC mp_obj_t espnow_recv(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
     size_t timeout_ms = (
         (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
 
@@ -437,7 +437,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recv_obj, 1, 2, espnow_recv);
 
 // Test if data is available to read from the buffers
 STATIC mp_obj_t espnow_poll(const mp_obj_t _) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     return buffer_empty(self->recv_buffer) ? mp_const_false : mp_const_true;
 }
@@ -528,7 +528,7 @@ static const uint8_t *_get_peer(mp_obj_t mac_addr) {
 //   False if sync==True and message is not received by at least one recipient
 // Raises: EAGAIN if the internal espnow buffers are full.
 STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
     // Check the various combinations of input arguments
     mp_obj_t peer = (n_args > 2) ? args[1] : mp_const_none;
     mp_obj_t msg = (n_args > 2) ? args[2] : (n_args == 2) ? args[1] : MP_OBJ_NULL;
@@ -600,7 +600,7 @@ STATIC bool _update_peer_info(
 // The peer_count is used for the send()/write() logic and is updated
 // from add_peer(), mod_peer() and del_peer().
 STATIC void _update_peer_count() {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
     esp_now_peer_num_t peer_num = {0};
     check_esp_err(esp_now_get_peer_num(&peer_num));
     self->peer_count = peer_num.total_num;
@@ -705,7 +705,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_del_peer_obj, espnow_del_peer);
 //     ((peer_addr, lmk, channel, ifidx, encrypt),
 //      (peer_addr, lmk, channel, ifidx, encrypt), ...)
 STATIC mp_obj_t espnow_get_peers(mp_obj_t _) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     mp_obj_tuple_t *peerinfo_tuple = mp_obj_new_tuple(self->peer_count, NULL);
     esp_now_peer_info_t peer = {0};
@@ -751,7 +751,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
 // Read an ESPNow packet into a stream buffer
 STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
     mp_uint_t size, int *errcode) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     int len = _get_packet(self->recv_buffer, buf_in, size, 0);
     if (len == 0) {
@@ -764,7 +764,7 @@ STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
 // Adapted from py/stream.c:stream_readinto()
 // Want to force just a single read - don't keep looping to fill the buffer.
 STATIC mp_obj_t espnow_stream_readinto1(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     mp_buffer_info_t buf;
     mp_get_buffer_raise(args[1], &buf, MP_BUFFER_WRITE);
@@ -781,7 +781,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(
 // Raise ValueError if there is an ee
 STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
     mp_uint_t max_size, int *errcode) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
     espnow_pkt_t *pkt = (espnow_pkt_t *)buf_in;
 
     int pkt_len = _check_packet_length((espnow_hdr_t *)pkt, max_size);
@@ -793,7 +793,7 @@ STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
 // Support MP_STREAM_POLL for asyncio
 STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
     mp_uint_t arg, int *errcode) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
     mp_uint_t ret;
     if (request == MP_STREAM_POLL) {
         mp_uint_t flags = arg;
@@ -816,7 +816,7 @@ STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
 
 // Iterating over ESPNow returns tuples of (peer_addr, message)...
 STATIC mp_obj_t espnow_iternext(mp_obj_t self_in) {
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     if (self->recv_buffer == NULL) {
         return MP_OBJ_STOP_ITERATION;
     }
