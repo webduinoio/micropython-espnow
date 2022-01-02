@@ -418,8 +418,12 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         esp_exceptions(esp_wifi_set_protocol(self->if_id, mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
-                    case MP_QSTR_power: {
+                    case MP_QSTR_ps_mode: {
                         esp_exceptions(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
+                        break;
+                    }
+                    case MP_QSTR_max_tx_power: {
+                        esp_exceptions(esp_wifi_set_max_tx_power(mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
                     case MP_QSTR_essid: {
@@ -451,8 +455,13 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         break;
                     }
                     case MP_QSTR_channel: {
-                        req_if = WIFI_IF_AP;
-                        cfg.ap.channel = mp_obj_get_int(kwargs->table[i].value);
+                        if (self->if_id == WIFI_IF_AP) {
+                            cfg.ap.channel = mp_obj_get_int(kwargs->table[i].value);
+                        } else {
+                            // Set the STA_IF channel (needed by ESPNow, enforces 20MHz bandwidth)
+                            uint8_t channel = mp_obj_get_int(kwargs->table[i].value);
+                            esp_exceptions(esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE));
+                        }
                         break;
                     }
                     case MP_QSTR_dhcp_hostname: {
@@ -522,6 +531,18 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
             val = MP_OBJ_NEW_SMALL_INT(protocol_bitmap);
             break;
         }
+        case MP_QSTR_ps_mode: {
+            wifi_ps_type_t ps_type;
+            esp_exceptions(esp_wifi_get_ps(&ps_type));
+            val = MP_OBJ_NEW_SMALL_INT(ps_type);
+            break;
+        }
+        case MP_QSTR_max_tx_power: {
+            int8_t power;
+            esp_exceptions(esp_wifi_get_max_tx_power(&power));
+            val = MP_OBJ_NEW_SMALL_INT(power);
+            break;
+        }
         case MP_QSTR_essid:
             switch (self->if_id) {
                 case WIFI_IF_STA:
@@ -542,10 +563,13 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
             req_if = WIFI_IF_AP;
             val = MP_OBJ_NEW_SMALL_INT(cfg.ap.authmode);
             break;
-        case MP_QSTR_channel:
-            req_if = WIFI_IF_AP;
-            val = MP_OBJ_NEW_SMALL_INT(cfg.ap.channel);
+        case MP_QSTR_channel: {
+            uint8_t channel;
+            wifi_second_chan_t second;
+            esp_exceptions(esp_wifi_get_channel(&channel, &second));
+            val = MP_OBJ_NEW_SMALL_INT(channel);
             break;
+        }
         case MP_QSTR_dhcp_hostname: {
             const char *s;
             esp_exceptions(tcpip_adapter_get_hostname(self->if_id, &s));
