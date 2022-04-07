@@ -1,9 +1,13 @@
 # Test of a ESPnow echo server and client transferring data.
-# This test works with ESP32 or ESP8266 as server or client.
+# Test the ESP32 extemnsions. Assumes instance1 is an ESP32.
+# Instance1 may be and ESP32 or ESP8266
 
 try:
+    import time
     import network
     import random
+    import uselect
+    import usys
     from esp import espnow
 except ImportError:
     print("SKIP")
@@ -34,7 +38,7 @@ def echo_server(e):
             return
 
 
-def echo_test(e, peer, msg, sync):
+def client_send(e, peer, msg, sync):
     print("TEST: send/recv(msglen=", len(msg), ",sync=", sync, "): ", end="", sep="")
     try:
         if not e.send(peer, msg, sync):
@@ -45,20 +49,6 @@ def echo_test(e, peer, msg, sync):
         print("ERROR: OSError:")
         return
 
-    p2, msg2 = e.irecv(timeout)
-    print("OK" if msg2 == msg else "ERROR: Received != Sent")
-
-
-def echo_client(e, peer, msglens):
-    for sync in [True, False]:
-        for msglen in msglens:
-            msg = bytearray(msglen)
-            if msglen > 0:
-                msg[0] = b"_"[0]  # Random message must not start with '!'
-            for i in range(1, msglen):
-                msg[i] = random.getrandbits(8)
-            echo_test(e, peer, msg, sync)
-
 
 def init(sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
@@ -67,8 +57,16 @@ def init(sta_active=True, ap_active=False):
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
-    wlans[0].disconnect()  # Force esp8266 STA interface to disconnect from AP
     return e
+
+
+def poll(e):
+    poll = uselect.poll()
+    poll.register(e, uselect.POLLIN)
+    p = poll.ipoll(timeout)
+    if not p:
+        print("ERROR: poll() timeout waiting for response.")
+    return p
 
 
 # Server
@@ -84,10 +82,43 @@ def instance0():
 
 # Client
 def instance1():
+    # Instance 1 (the client) must be an ESP32
+    if usys.platform != "esp32":
+        print("SKIP")
+        raise SystemExit
+
     e = init(True, False)
+    e.config(timeout=timeout)
     multitest.next()
     peer = PEERS[0]
     e.add_peer(peer)
-    echo_client(e, peer, [1, 2, 8, 100, 249, 250, 251, 0])
-    echo_test(e, peer, "!done", True)
+
+    # assert len(e.peers) == 1
+    print("IRECV() test...")
+    msg = bytes([random.getrandbits(8) for _ in range(12)])
+    client_send(e, peer, msg, True)
+    p2, msg2 = e.irecv()
+    print("OK" if msg2 == msg else "ERROR: Received != Sent")
+
+    print("RSSI test...")
+    if len(e.peers) != 1:
+        print("ERROR: len(ESPNow.peers()) != 1. ESPNow.peers()=", peers)
+    elif list(e.peers.keys())[0] != peer:
+        print("ERROR: ESPNow.peers().keys[0] != peer. ESPNow.peers()=", peers)
+    else:
+        rssi, time_ms = e.peers[peer]
+        if not -127 < rssi < 0:
+            print("ERROR: Invalid rssi value:", rssi)
+        elif abs(time.time() - time_ms / 1000) > 5:
+            print("ERROR: Unexpected time_ms value:", time_ms)
+        else:
+            print("OK")
+
+    # Tell the server to stop
+    print("DONE")
+    msg = b"!done"
+    client_send(e, peer, msg, True)
+    p2, msg2 = e.irecv()
+    print("OK" if msg2 == msg else "ERROR: Received != Sent")
+
     e.deinit()
