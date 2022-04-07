@@ -20,6 +20,7 @@ def init(sta_active=True, ap_active=False):
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
+    wlans[0].disconnect()   # Force esp8266 STA interface to disconnect from AP
     e.set_pmk(default_pmk)
     return e
 
