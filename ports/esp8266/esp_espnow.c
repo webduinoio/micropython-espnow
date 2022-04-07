@@ -132,7 +132,7 @@ static void check_esp_err(int e) {
 // Return a pointer to the ESPNow module singleton
 // If state == INITIALISED check the device has been initialised.
 // Raises OSError if not initialised and state == INITIALISED.
-static esp_espnow_obj_t *get_singleton(int state) {
+static esp_espnow_obj_t *_get_singleton(int state) {
     return MP_STATE_PORT(espnow_singleton);
 }
 
@@ -186,7 +186,7 @@ STATIC void recv_cb(uint8_t *mac_addr, uint8_t *data, uint8_t len);
 // allocate the recv data buffers.
 // Returns None.
 STATIC mp_obj_t espnow_init(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     if (n_args > 2 && (args[2] != mp_const_none)) {
         self->recv_timeout_ms = mp_obj_get_int(args[2]);
     }
@@ -213,7 +213,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_init_obj, 1, 4, espnow_init);
 // Note: this function is called from main.c:mp_task() to cleanup before soft
 // reset, so cannot be declared STATIC and must guard against self == NULL;.
 mp_obj_t espnow_deinit(mp_obj_t _) {
-    esp_espnow_obj_t *self = get_singleton(0);
+    esp_espnow_obj_t *self = _get_singleton(0);
     if (self != NULL && self->recv_buffer != NULL) {
         esp_now_unregister_recv_cb();
         esp_now_unregister_send_cb();
@@ -315,7 +315,7 @@ static int _get_packet(
 // Default timeout is set with ESPNow.config(timeout=milliseconds).
 // Returns (None, None) on timeout.
 STATIC mp_obj_t espnow_irecv(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     size_t timeout_ms = (
         (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
@@ -369,7 +369,7 @@ static uint8_t *_get_bytes_len(mp_obj_t obj, size_t len) {
 //   False if sync==True and message is not received by at least one recipient
 // Raises: EAGAIN if the internal espnow buffers are full.
 STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = get_singleton(INITIALISED);
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     // Get a pointer to the buffer of obj
     mp_buffer_info_t bufinfo;

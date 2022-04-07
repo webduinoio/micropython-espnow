@@ -46,6 +46,7 @@ def client_send(e, peer, msg, sync):
         # Don't print exc as it is differs for esp32 and esp8266
         print("ERROR: OSError:")
         return
+    print("OK")
 
 
 def init(sta_active=True, ap_active=False):
@@ -55,6 +56,7 @@ def init(sta_active=True, ap_active=False):
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
+    wlans[0].disconnect()  # Force esp8266 STA interface to disconnect from AP
     return e
 
 
@@ -99,14 +101,39 @@ try:
             msgs.append(bytes([random.getrandbits(8) for _ in range(12)]))
             client_send(e, peer, msgs[i], True)
 
-        msg2 = await s.read(-1)
+        msg2 = b""
+        for i in range(5):
+            msg2 += await s.read(-1)
+            if len(msg2) == 100:
+                break
+            print("INFO: s.read() returns {} bytes.".format(len(msg2)))
+
+        if len(msg2) != 100:
+            print("INFO: s.read() returns {} bytes.".format(len(msg2)))
+
         for i in range(5):
             msg = msgs[i]
-            print(
-                "OK"
-                if msg2[0] == 0x99 and msg2[8 : 8 + msg2[1]] == msg
-                else "ERROR: Received != Sent"
-            )
+
+            if (
+                len(msg2) < 20
+                or msg2[0] != 0x99
+                or len(msg2) < 8 + msg2[1]
+                or msg2[8 : 8 + msg2[1]] != msg
+            ):
+                print(
+                    "ERROR: i={} recv_len={}".format(i, len(msg2))
+                    + (" magic={}".format(msg2[0]) if len(msg2) > 0 else "")
+                    + (" msg_len={}".format(msg2[1]) if len(msg2) > 1 else "")
+                    + (" peer={}".format(msg2[2:8]) if len(msg2) > 8 else "")
+                    + (
+                        " recv_msg={}".format(msg2[8 : min(len(msg2), 8 + msg2[1])])
+                        if len(msg2) > 8
+                        else ""
+                    )
+                    + (" sent={}".format(msg))
+                )
+            else:
+                print("OK")
             msg2 = msg2[8 + msg2[1] :]
 
         # Tell the server to stop
