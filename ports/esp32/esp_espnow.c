@@ -283,13 +283,6 @@ STATIC mp_obj_t espnow_stats(mp_obj_t _) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_stats_obj, espnow_stats);
 
-STATIC mp_obj_t espnow_version(mp_obj_t _) {
-    uint32_t version;
-    check_esp_err(esp_now_get_version(&version));
-    return mp_obj_new_int(version);
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_version_obj, espnow_version);
-
 // ### Maintaining the peer table and reading RSSI values
 //
 // We maintain a peers table for several reasons, to:
@@ -772,6 +765,7 @@ STATIC mp_obj_t espnow_add_peer(
 
     check_esp_err(esp_now_add_peer(&peer));
     _update_peer_count();
+    // Add to the peer device table: self->peers_table
     _add_peer_to_table(self, peer.peer_addr);
 
     return mp_const_none;
@@ -802,6 +796,20 @@ STATIC mp_obj_t espnow_mod_peer(
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_mod_peer_obj, 2, espnow_mod_peer);
 
+// Convert a peer_info struct to python tuple
+// Used by espnow_get_peer() and espnow_get_peers()
+static mp_obj_t peer_info_to_tuple(const esp_now_peer_info_t *peer) {
+    return mp_obj_new_tuple(5,
+        (mp_obj_t[]) {
+            mp_obj_new_bytes(peer->peer_addr, sizeof(peer->peer_addr)),
+            mp_obj_new_bytes(peer->lmk, sizeof(peer->lmk)),
+            mp_obj_new_int(peer->channel),
+            mp_obj_new_int(peer->ifidx),
+            (peer->encrypt) ? mp_const_true : mp_const_false,
+        }
+    );
+}
+
 // ESPNow.get_peer(peer_mac): Get the peer info for peer_mac as a tuple.
 // Raise OSError if ESPNow.init() has not been called.
 // Raise ValueError if mac or LMK are not bytes-like objects or wrong length.
@@ -812,16 +820,7 @@ STATIC mp_obj_t espnow_get_peer(mp_obj_t _, mp_obj_t arg1) {
 
     check_esp_err(esp_now_get_peer(peer.peer_addr, &peer));
 
-    // Return a tuple of (peer_addr, lmk, channel, ifidx, encrypt)
-    mp_obj_t items[] = {
-        mp_obj_new_bytes(peer.peer_addr, sizeof(peer.peer_addr)),
-        mp_obj_new_bytes(peer.lmk, sizeof(peer.lmk)),
-        mp_obj_new_int(peer.channel),
-        mp_obj_new_int(peer.ifidx),
-        (peer.encrypt) ? mp_const_true : mp_const_false,
-    };
-
-    return mp_obj_new_tuple(5, items);
+    return peer_info_to_tuple(&peer);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_get_peer_obj, espnow_get_peer);
 
@@ -854,14 +853,7 @@ STATIC mp_obj_t espnow_get_peers(mp_obj_t _) {
     int count = 0;
     while (esp_now_fetch_peer(from_head, &peer) == ESP_OK) {
         from_head = false;
-        mp_obj_t items[] = {
-            mp_obj_new_bytes(peer.peer_addr, sizeof(peer.peer_addr)),
-            mp_obj_new_bytes(peer.lmk, sizeof(peer.lmk)),
-            mp_obj_new_int(peer.channel),
-            mp_obj_new_int(peer.ifidx),
-            (peer.encrypt) ? mp_const_true : mp_const_false,
-        };
-        peerinfo_tuple->items[count] = mp_obj_new_tuple(5, items);
+        peerinfo_tuple->items[count] = peer_info_to_tuple(&peer);
         if (++count >= self->peer_count) {
             break;          // Should not happen
         }
@@ -964,7 +956,7 @@ STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
 
 // Support MP_STREAM_POLL for asyncio
 STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
-    mp_uint_t arg, int *errcode) {
+    uintptr_t arg, int *errcode) {
     esp_espnow_obj_t *self = _get_singleton(INITIALISED);
     mp_uint_t ret;
     if (request == MP_STREAM_POLL) {
@@ -995,19 +987,11 @@ STATIC mp_obj_t espnow_iternext(mp_obj_t self_in) {
     return espnow_irecv(1, &self_in);
 }
 
-STATIC void espnow_print(const mp_print_t *print, mp_obj_t self_in,
-    mp_print_kind_t kind) {
-    esp_espnow_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    mp_printf(print, "ESPNow(rxbuf=%u, timeout=%u)",
-        self->recv_buffer_size, self->recv_timeout_ms);
-}
-
 STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&espnow_init_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit), MP_ROM_PTR(&espnow_deinit_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&espnow_config_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&espnow_stats_obj) },
-    { MP_ROM_QSTR(MP_QSTR_version), MP_ROM_PTR(&espnow_version_obj) },
 
     // Send and receive messages
     { MP_ROM_QSTR(MP_QSTR_recv), MP_ROM_PTR(&espnow_recv_obj) },
@@ -1057,7 +1041,6 @@ const mp_obj_type_t esp_espnow_type = {
     .name = MP_QSTR_ESPNow,
     .make_new = espnow_make_new,
     .attr = espnow_attr,
-    .print = espnow_print,
     .getiter = mp_identity_getiter,
     .iternext = espnow_iternext,
     .protocol = &espnow_stream_p,
