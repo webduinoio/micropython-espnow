@@ -801,13 +801,12 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_mod_peer_obj, 2, espnow_mod_peer);
 static mp_obj_t peer_info_to_tuple(const esp_now_peer_info_t *peer) {
     return mp_obj_new_tuple(5,
         (mp_obj_t[]) {
-            mp_obj_new_bytes(peer->peer_addr, sizeof(peer->peer_addr)),
-            mp_obj_new_bytes(peer->lmk, sizeof(peer->lmk)),
-            mp_obj_new_int(peer->channel),
-            mp_obj_new_int(peer->ifidx),
-            (peer->encrypt) ? mp_const_true : mp_const_false,
-        }
-    );
+        mp_obj_new_bytes(peer->peer_addr, sizeof(peer->peer_addr)),
+        mp_obj_new_bytes(peer->lmk, sizeof(peer->lmk)),
+        mp_obj_new_int(peer->channel),
+        mp_obj_new_int(peer->ifidx),
+        (peer->encrypt) ? mp_const_true : mp_const_false,
+    });
 }
 
 // ESPNow.get_peer(peer_mac): Get the peer info for peer_mac as a tuple.
@@ -878,70 +877,6 @@ STATIC mp_obj_t espnow_peer_count(mp_obj_t _) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
 
-#if MICROPY_ESPNOW_BUFFER_PROTOCOL
-// ### Stream I/O protocol functions (to support uasyncio)
-//
-
-// Copy the next packet from the recv buffer to buf_out.
-// Raises ValueError if the header is bad or the packet is larger than max_size.
-// Returns the length of the packet or 0 if there is no packet available.
-static int _get_packet(
-    buffer_t buffer, void *buf_out, size_t max_size, int timeout_ms) {
-
-    espnow_pkt_t *pkt = buf_out;
-    if (!buffer_recv(buffer, pkt, sizeof(*pkt), timeout_ms)) {
-        return 0;
-    }
-    int pkt_len = _check_packet_length((espnow_hdr_t *)pkt, 0);
-    if (!buffer_get(buffer, pkt->msg, pkt->msg_len)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("Buffer error"));
-    }
-    return pkt_len;
-}
-
-// Adapted from py/stream.c:stream_readinto()
-// Want to force just a single read - don't keep looping to fill the buffer.
-STATIC mp_obj_t espnow_stream_readinto1(size_t n_args, const mp_obj_t *args) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-
-    mp_buffer_info_t buf;
-    mp_get_buffer_raise(args[1], &buf, MP_BUFFER_WRITE);
-
-    int len = _get_packet(self->recv_buffer, buf.buf, buf.len, 0);
-
-    return (len > 0) ? MP_OBJ_NEW_SMALL_INT(len) : mp_const_none;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(
-    espnow_stream_readinto1_obj, 2, 3, espnow_stream_readinto1);
-
-// Read an ESPNow packet into a stream buffer
-STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
-    mp_uint_t size, int *errcode) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-
-    int len = _get_packet(self->recv_buffer, buf_in, size, 0);
-    if (len == 0) {
-        *errcode = MP_EAGAIN;
-        return MP_STREAM_ERROR;
-    }
-    return len;
-}
-
-// ESPNow.write(packet): Send a message from an ESPNow packet in buf_in.
-// Raise OSError if not initialised (ESPNow.init()).
-// Raise ValueError if there is an ee
-STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
-    mp_uint_t max_size, int *errcode) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-    espnow_pkt_t *pkt = (espnow_pkt_t *)buf_in;
-
-    int pkt_len = _check_packet_length((espnow_hdr_t *)pkt, max_size);
-    // Send the message to the peer
-    _do_espnow_send(self, pkt->peer, pkt->msg, pkt->msg_len, false);
-    return pkt_len;
-}
-
-#else
 // Use dummy read and write functions for the buffer protocol
 STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
     mp_uint_t max_size, int *errcode) {
@@ -952,7 +887,6 @@ STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
     mp_uint_t max_size, int *errcode) {
     mp_raise_NotImplementedError(MP_ERROR_TEXT("stream_write()"));
 }
-#endif
 
 // Support MP_STREAM_POLL for asyncio
 STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
@@ -1007,15 +941,6 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_del_peer), MP_ROM_PTR(&espnow_del_peer_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_peers), MP_ROM_PTR(&espnow_get_peers_obj) },
     { MP_ROM_QSTR(MP_QSTR_peer_count), MP_ROM_PTR(&espnow_peer_count_obj) },
-
-    #if MICROPY_ESPNOW_BUFFER_PROTOCOL
-    // StreamIO and uasyncio support
-    { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&mp_stream_read_obj) },
-    { MP_ROM_QSTR(MP_QSTR_read1), MP_ROM_PTR(&mp_stream_read1_obj) },
-    { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_stream_readinto_obj) },
-    { MP_ROM_QSTR(MP_QSTR_readinto1), MP_ROM_PTR(&espnow_stream_readinto1_obj) },
-    { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_stream_write_obj) },
-    #endif
 };
 STATIC MP_DEFINE_CONST_DICT(esp_espnow_locals_dict, esp_espnow_locals_dict_table);
 
