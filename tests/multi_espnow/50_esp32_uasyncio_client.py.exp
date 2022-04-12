@@ -2,7 +2,7 @@
 Server Start
 Server Done
 --- instance1 ---
-READ() test...
+airecv() test...
 TEST: send/recv(msglen=12,sync=True): OK
 TEST: send/recv(msglen=12,sync=True): OK
 TEST: send/recv(msglen=12,sync=True): OK
