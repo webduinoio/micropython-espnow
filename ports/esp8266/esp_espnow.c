@@ -48,10 +48,10 @@
 
 // Reduce code size by declaring all ring-buffer functions static
 #define RING_BUFFER_INCLUDE_AS_STATIC
-#include "ring_buffer.h"
+#include "shared/runtime/ring_buffer.h"
 // Include the "static" ring_buffer function defs in this file.
 // This reduces code size on the ESP8266 by 88 bytes.
-#include "ring_buffer.c"
+#include "shared/runtime/ring_buffer.c"
 
 // For the esp8266
 #define ESP_NOW_MAX_DATA_LEN (250)

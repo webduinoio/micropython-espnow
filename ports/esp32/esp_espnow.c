@@ -48,7 +48,7 @@
 #include "mpconfigport.h"
 #include "mphalport.h"
 #include "modnetwork.h"
-#include "ring_buffer.h"
+#include "shared/runtime/ring_buffer.h"
 #include "esp_espnow.h"
 
 #ifndef MICROPY_ESPNOW_BUFFER_PROTOCOL
