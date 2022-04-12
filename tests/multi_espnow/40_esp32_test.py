@@ -111,64 +111,6 @@ def instance1():
     p2, msg2 = next(e)
     print("OK" if msg2 == msg else "ERROR: Received != Sent")
 
-    print("READ() test...")
-    msg = bytes([random.getrandbits(8) for _ in range(12)])
-    client_send(e, peer, msg, True)
-    if poll(e):
-        msg2 = e.read()
-        print(
-            "OK" if msg2[0] == 0x99 and msg2[8 : 8 + msg2[1]] == msg else "ERROR: Received != Sent"
-        )
-
-    print("READ1() test...")
-    msg = bytes([random.getrandbits(8) for _ in range(12)])
-    client_send(e, peer, msg, True)
-    if poll(e):
-        msg2 = e.read1()
-        print(
-            "OK" if msg2[0] == 0x99 and msg2[8 : 8 + msg2[1]] == msg else "ERROR: Received != Sent"
-        )
-
-    print("READINTO() test...")
-    msg = bytes([random.getrandbits(8) for _ in range(12)])
-    client_send(e, peer, msg, True)
-    msg2 = bytearray(258)
-    if poll(e):
-        e.readinto(msg2)
-        print(
-            "OK" if msg2[0] == 0x99 and msg2[8 : 8 + msg2[1]] == msg else "ERROR: Received != Sent"
-        )
-
-    print("READINTO1() test...")
-    msg = bytes([random.getrandbits(8) for _ in range(12)])
-    client_send(e, peer, msg, True)
-    msg2 = bytearray(258)
-    if poll(e):
-        e.readinto1(msg2)
-        print(
-            "OK" if msg2[0] == 0x99 and msg2[8 : 8 + msg2[1]] == msg else "ERROR: Received != Sent"
-        )
-
-    print("WRITE() test...")
-    msg = bytes([random.getrandbits(8) for _ in range(12)])
-    client_send(e, peer, msg, True)
-    msg2 = bytearray(258)
-    if poll(e):
-        # First - read the packet back from the echo server
-        msg2 = e.read1()
-        try:
-            # Now, write it back to the echo server again
-            if not e.write(msg2):
-                print("ERROR: Write failed.")
-                return
-        except OSError as exc:
-            # Don't print exc as it is differs for esp32 and esp8266
-            print("ERROR: OSError:")
-            return
-        # And finally... read it back again
-        p3, msg3 = e.irecv()
-        print("OK" if msg3 == msg else "ERROR: Received != Sent")
-
     # Tell the server to stop
     print("DONE")
     msg = b"!done"

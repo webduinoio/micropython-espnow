@@ -47,21 +47,18 @@ def instance0():
 
 try:
     import uasyncio as asyncio
+    from aioespnow import AIOESPNow
 
     async def echo_server(e):
         peers = []
-        s = asyncio.StreamReader(e)
-        while True:
-            resp = await s.read(-1)
-            peer = resp[2:8]
-            msg = resp[8 : 8 + resp[1]]
+        async for peer, msg in e:
             if peer not in peers:
                 peers.append(peer)
                 e.add_peer(peer)
 
             #  Echo the message back to the sender
-            if not e.send(peer, msg, sync):
-                print("ERROR: send() failed to", peer)
+            if not await e.asend(peer, msg, sync):
+                print("ERROR: asend() failed to", peer)
                 return
 
             if msg == b"!done":
@@ -75,7 +72,7 @@ try:
         multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
         multitest.next()
         print("Server Start")
-        asyncio.run(echo_server(e))
+        asyncio.run(echo_server(AIOESPNow(e)))
         print("Server Done")
         e.deinit()
 

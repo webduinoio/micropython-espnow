@@ -88,52 +88,31 @@ try:
     import uasyncio as asyncio
 
     async def client():
-        e = init(True, False)
+        from aioespnow import AIOESPNow
+
+        e = AIOESPNow(init(True, False))
         e.config(timeout=timeout)
         peer = PEERS[0]
         e.add_peer(peer)
         multitest.next()
 
-        s = asyncio.StreamReader(e)
-        print("READ() test...")
+        print("airecv() test...")
         msgs = []
         for i in range(5):
+            # Send messages to the peer who will echo it back
             msgs.append(bytes([random.getrandbits(8) for _ in range(12)]))
             client_send(e, peer, msgs[i], True)
 
-        msg2 = b''
         for i in range(5):
-            msg2 += await s.read(-1)
-            if len(msg2) == 100:
-                break
-            print("INFO: s.read() returns {} bytes.".format(len(msg2)))
-
-        if len(msg2) != 100:
-            print("INFO: s.read() returns {} bytes.".format(len(msg2)))
-
-        for i in range(5):
-            msg = msgs[i]
-
-            if (len(msg2) < 20 or msg2[0] != 0x99 or
-                len(msg2) < 8 + msg2[1] or msg2[8 : 8 + msg2[1]] != msg):
-                print("ERROR: i={} recv_len={}".format(i, len(msg2))
-                    + (" magic={}".format(msg2[0]) if len(msg2) > 0 else "")
-                    + (" msg_len={}".format(msg2[1]) if len(msg2) > 1 else "")
-                    + (" peer={}".format(msg2[2:8]) if len(msg2) > 8 else "")
-                    + (" recv_msg={}".format(msg2[8:min(len(msg2),8+msg2[1])]) if len(msg2) > 8 else "")
-                    + (" sent={}".format(msg)))
-            else:
-                print("OK")
-            msg2 = msg2[8 + msg2[1] :]
+            mac, reply = await e.airecv()
+            print("OK" if reply == msgs[i] else "ERROR: Received != Sent")
 
         # Tell the server to stop
         print("DONE")
         msg = b"!done"
         client_send(e, peer, msg, True)
-        msg2 = await s.read(-1)
-        print(
-            "OK" if msg2[0] == 0x99 and msg2[8 : 8 + msg2[1]] == msg else "ERROR: Received != Sent"
-        )
+        mac, reply = await e.airecv()
+        print("OK" if reply == msg else "ERROR: Received != Sent")
 
         e.deinit()
 
