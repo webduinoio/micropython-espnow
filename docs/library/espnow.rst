@@ -20,8 +20,8 @@ Table of Contents:
     - `Exceptions`_
     - `Constants - (ESP32 Only)`_
     - `Iteration over ESPNow - (ESP32 Only)`_
-    - `Stream IO interface - (ESP32 Only)`_
     - `Supporting asyncio - (ESP32 Only)`_
+    - `Stream IO interface - (deprecated)`_
     - `Broadcast and Multicast`_
     - `ESPNow and Wifi Operation`_
     - `ESPNow and Sleep Modes`_
@@ -564,76 +564,135 @@ the for loop will exit.
 **Note**: Iteration will yield ``(None, None)`` if the default timeout expires
 while waiting for a message.
 
-Stream IO interface - (ESP32 Only)
-----------------------------------
-
-`ESPNow` also supports the micropython ``stream`` io interface. This is
-intended to help support high throughput low-copy transfers and also to
-support ``uasyncio`` through the StreamReader interface. ESPNow includes
-support for the following python `stream interface
-<https://docs.python.org/3/library/io.html>`_ methods:
-
-.. method:: ESPNow.read([nbytes])
-
-    Return up to ``size`` bytes from the espnow recv buffers as a byte string.
-    If nbytes is specified then read at most that many bytes, otherwise read
-    as many packets as possible. Is nonblocking and returns ``None`` if no
-    data is available. Always reads whole packets.
-
-.. method:: ESPNow.read1([size=-1])
-
-    As for `read()` but will return after at most one packet is read.
-
-.. method:: ESPNow.readinto(b[, nbytes])
-
-    Read bytes into a pre-allocated, writable bytes-like object (eg.
-    bytearray) and return the number of bytes read. If ``nbytes`` is specified
-    then read at most that many bytes, Returns the number of bytes read or
-    ``None`` on timeout. Always reads whole packets.
-
-.. method:: ESPNow.readinto1(b)
-
-    As for `readinto()` but will return after at most one packets are read.
-
-.. method:: ESPNow.write(b)
-
-    Write the given bytes-like object to the ESPNow interface. ``b`` must
-    contain a sequence of ESPNow buffer packet data.
-
-**Note**: The ESPNow stream packet format is a bytearray or bytes-like object
-with the following format::
-
-    .-------------------------------------------------------------.
-    | magic  | msg_len |   peer    |         msg                  |
-    | 1 byte | 1 byte  |  6 bytes  |   Up to 250 bytes            |
-    '-------------------------------------------------------------'
-
-- ``magic`` is a constant identifier (=0x99);
-- ``msg_len`` is the length of the message (in bytes);
-- ``peer`` is the MAC address of the peer (sender or recipient); and
-- ``msg`` is the message to be sent/received (up to `espnow.MAX_DATA_LEN`
-  bytes).
-
-A python module is available for managing ESPNow message packets through the
-``stream`` interface.
-
-`ESPNow` also supports the `poll.poll()` and `poll.ipoll` calls, so users
-may wait on received events.
-
 Supporting asyncio - (ESP32 Only)
 ---------------------------------
 
-`ESPNow` uses the ``stream`` io interface to support the micropython
-``uasyncio`` module for asynchronous IO. A ``StreamReader`` class may be
-constructed from an ESPNow object and used to support async IO. Eg::
+A supplementary module (`aioespnow`) is available to provide :doc:`uasyncio`
+support.
 
-    s = StreamReader(e)
+A toy async server example::
 
-    async def areadespnow(s):
-        while e.send(b'ping'):
-            msg = await(s.read1())
-            if msg[8:] != b'pong'
-                break
+    import network
+    import aioespnow as espnow
+    import uasyncio as asyncio
+
+    # A WLAN interface must be active to send()/recv()
+    network.WLAN(network.STA_IF).active(True)
+
+    e = espnow.ESPNow()       # ESPNow enhanced with async support
+    e.init()
+    peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'
+    e.add_peer(peer)
+
+    # Send a periodic ping to a peer
+    async def heartbeat(e, peer, period=30):
+        while True:
+            if not await e.asend(peer, b'ping'):
+                print("Heartbeat: peer not responding:", peer)
+            else:
+                print("Heartbeat: ping", peer)
+            await asyncio.sleep(period)
+
+    # Echo any received messages back to the sender
+    async def echo_server(e):
+        async for mac, msg in e:
+            print("Echo:", msg)
+            try:
+                await e.asend(mac, msg)
+            except OSError as err:
+                if len(err.args) > 1 and err.args[1] == 'ESP_ERR_ESPNOW_NOT_FOUND':
+                    e.add_peer(mac)
+                    await e.asend(mac, msg)
+
+    async def main(e, peer, timeout, period):
+        asyncio.create_task(heartbeat(e, peer, period))
+        asyncio.create_task(echo_server(e))
+        await asyncio.sleep(timeout)
+
+    asyncio.run(main(e, peer, 120, 10))
+
+.. module:: aioespnow
+    :synopsis: ESP-NOW :doc:`uasyncio` support
+
+.. class:: AIOESPNow(e)
+
+    Returns the singleton `AIOESPNow` object. The `AIOESPNow` class inherits
+    all the methods of `ESPNow<espnow.ESPNow>` and extends the interface with the
+    following async methods. The constructor takes an optional argument which
+    should be an existing `ESPNow<espnow.ESPNow>` instance.
+
+.. method:: async AIOESPNow.arecv()
+            async AIOESPNow.airecv()
+
+    Asyncio support for `ESPNow.recv()` and `ESPNow.irecv()`. Note that
+    these methods do not take a timeout value as argument.
+
+.. method:: async AIOESPNow.asend(mac, msg=None, sync=True)
+            async AIOESPNow.asend(msg)
+
+    Asyncio support for `ESPNow.send()`.
+
+**Snippet:** Extend an already initialised `ESPNow<espnow.ESPNow>` with
+async support::
+
+    ...
+
+    from aioespnow import AIOESPNow
+    import uasyncio as asyncio
+
+    a = AIOESPNow(e)    # Return an asyncio enhanced ESPNow object
+
+    asyncio.run(a.airecv())
+
+**Snippet:** Use `AIOESPNow` as stand-in for `ESPNow<espnow.ESPNow>`::
+
+    from esp import espnow
+    from aioespnow import AIOESPNow
+    import uasyncio as asyncio
+
+    e = AIOESPNow()    # An ESPNow object extended with async support
+
+    e.init()
+    peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'
+    e.add_peer(peer)
+
+    asyncio.run(e.asend(peer, b'ping'))
+
+.. function:: ESPNow()
+
+    Return the `AIOESPNow` singleton object. This is a convenience function
+    for adding async support to existing non-async code.
+
+**Snippet:** Transition from existing non-async code::
+
+    import network
+    # from esp import espnow
+    import aioespnow as espnow
+
+    e = espnow.ESPNow()
+    e.init()
+    ...
+
+`AIOESPNow` also supports reading incoming messages by asynchronous
+iteration over the `AIOESPNow` singleton object using ``async for``,
+eg::
+
+    e = AIOESPNow()
+    e.init()
+
+    async def recv_till_halt(e):
+        async for mac, msg in e:
+            print(mac, msg)
+            if msg == b'halt':
+              break
+
+    asyncio.run(recv_till_halt(e))
+
+Stream IO interface - (deprecated)
+----------------------------------
+
+**The Stream IO interface support for reading and writing data is
+deprecated!!**
 
 Broadcast and Multicast
 -----------------------

@@ -51,6 +51,10 @@
 #include "ring_buffer.h"
 #include "esp_espnow.h"
 
+#ifndef MICROPY_ESPNOW_BUFFER_PROTOCOL
+#define MICROPY_ESPNOW_BUFFER_PROTOCOL          (0)
+#endif
+
 static const uint8_t ESPNOW_MAGIC = 0x99;
 
 // ESPNow packet format for the receive buffer.
@@ -91,7 +95,7 @@ typedef struct _esp_espnow_obj_t {
     mp_obj_base_t base;
     buffer_t recv_buffer;           // A buffer for received packets
     size_t recv_buffer_size;        // The size of the recv_buffer
-    size_t recv_timeout_ms;         // Timeout for recv()/irecv()/poll()/ipoll()
+    size_t recv_timeout_ms;         // Timeout for recv()/irecv()
     volatile size_t rx_packets;     // # of received packets
     size_t dropped_rx_pkts;         // # of dropped packets (buffer full)
     size_t tx_packets;              // # of sent packets
@@ -388,7 +392,7 @@ static inline int8_t _get_rssi_from_wifi_pkt(const uint8_t *msg) {
 
 // Update the peers table with the new rssi value from a received pkt and
 // return a reference to the item in the peers_table.
-// Must not allocate new memory.
+// Must not allocate new memory (will be called from recv_cb()).
 static mp_map_elem_t *_update_rssi(
     esp_espnow_obj_t *self, const uint8_t *peer, const uint8_t *msg) {
 
@@ -882,6 +886,7 @@ STATIC mp_obj_t espnow_peer_count(mp_obj_t _) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
 
+#if MICROPY_ESPNOW_BUFFER_PROTOCOL
 // ### Stream I/O protocol functions (to support uasyncio)
 //
 
@@ -902,19 +907,6 @@ static int _get_packet(
     return pkt_len;
 }
 
-// Read an ESPNow packet into a stream buffer
-STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
-    mp_uint_t size, int *errcode) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-
-    int len = _get_packet(self->recv_buffer, buf_in, size, 0);
-    if (len == 0) {
-        *errcode = MP_EAGAIN;
-        return MP_STREAM_ERROR;
-    }
-    return len;
-}
-
 // Adapted from py/stream.c:stream_readinto()
 // Want to force just a single read - don't keep looping to fill the buffer.
 STATIC mp_obj_t espnow_stream_readinto1(size_t n_args, const mp_obj_t *args) {
@@ -930,6 +922,19 @@ STATIC mp_obj_t espnow_stream_readinto1(size_t n_args, const mp_obj_t *args) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(
     espnow_stream_readinto1_obj, 2, 3, espnow_stream_readinto1);
 
+// Read an ESPNow packet into a stream buffer
+STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
+    mp_uint_t size, int *errcode) {
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
+
+    int len = _get_packet(self->recv_buffer, buf_in, size, 0);
+    if (len == 0) {
+        *errcode = MP_EAGAIN;
+        return MP_STREAM_ERROR;
+    }
+    return len;
+}
+
 // ESPNow.write(packet): Send a message from an ESPNow packet in buf_in.
 // Raise OSError if not initialised (ESPNow.init()).
 // Raise ValueError if there is an ee
@@ -943,6 +948,19 @@ STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
     _do_espnow_send(self, pkt->peer, pkt->msg, pkt->msg_len, false);
     return pkt_len;
 }
+
+#else
+// Use dummy read and write functions for the buffer protocol
+STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
+    mp_uint_t max_size, int *errcode) {
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("stream_read()"));
+}
+
+STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
+    mp_uint_t max_size, int *errcode) {
+    mp_raise_NotImplementedError(MP_ERROR_TEXT("stream_write()"));
+}
+#endif
 
 // Support MP_STREAM_POLL for asyncio
 STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
@@ -1006,12 +1024,14 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_get_peers), MP_ROM_PTR(&espnow_get_peers_obj) },
     { MP_ROM_QSTR(MP_QSTR_peer_count), MP_ROM_PTR(&espnow_peer_count_obj) },
 
+    #if MICROPY_ESPNOW_BUFFER_PROTOCOL
     // StreamIO and uasyncio support
     { MP_ROM_QSTR(MP_QSTR_read), MP_ROM_PTR(&mp_stream_read_obj) },
     { MP_ROM_QSTR(MP_QSTR_read1), MP_ROM_PTR(&mp_stream_read1_obj) },
     { MP_ROM_QSTR(MP_QSTR_readinto), MP_ROM_PTR(&mp_stream_readinto_obj) },
     { MP_ROM_QSTR(MP_QSTR_readinto1), MP_ROM_PTR(&espnow_stream_readinto1_obj) },
     { MP_ROM_QSTR(MP_QSTR_write), MP_ROM_PTR(&mp_stream_write_obj) },
+    #endif
 };
 STATIC MP_DEFINE_CONST_DICT(esp_espnow_locals_dict, esp_espnow_locals_dict_table);
 
