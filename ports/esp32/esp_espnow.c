@@ -55,6 +55,10 @@
 #define MICROPY_ESPNOW_BUFFER_PROTOCOL          (0)
 #endif
 
+// Relies on gcc Variadic Macros and Statement Expressions
+#define NEW_TUPLE(...) \
+    ({mp_obj_t _z[] = {__VA_ARGS__}; mp_obj_new_tuple(MP_ARRAY_SIZE(_z), _z); })
+
 static const uint8_t ESPNOW_MAGIC = 0x99;
 
 // ESPNow packet format for the receive buffer.
@@ -152,15 +156,13 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
     // Build a tuple (peer, msg). Where peer will be a reference
     // to the peer mac address in the peers table and msg is a bytearray
     // to hold a copy of the message from the packet buffer.
-    self->irecv_tuple = mp_obj_new_tuple(2,
-        (mp_obj_t[]) {
+    self->irecv_tuple = NEW_TUPLE(
         mp_const_none,
-        mp_obj_new_bytearray(
-            ESP_NOW_MAX_DATA_LEN,
-            m_malloc(ESP_NOW_MAX_DATA_LEN))
-    });
-    self->none_tuple = mp_obj_new_tuple(2,
-        (mp_obj_t[]) {mp_const_none, mp_const_none});
+        mp_obj_new_bytearray(ESP_NOW_MAX_DATA_LEN,
+            m_malloc(ESP_NOW_MAX_DATA_LEN)));
+    self->none_tuple = NEW_TUPLE(
+        mp_const_none,
+        mp_const_none);
 
     self->recv_cb = mp_const_none;
     self->peers_table = mp_obj_new_dict(0);
@@ -272,14 +274,12 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_config_obj, 1, espnow_config);
 //   (tx_pkts, tx_responses, tx_failures, rx_pkts, dropped_rx_pkts)
 STATIC mp_obj_t espnow_stats(mp_obj_t _) {
     const esp_espnow_obj_t *self = _get_singleton(0);
-    mp_obj_t items[] = {
+    return NEW_TUPLE(
         mp_obj_new_int(self->tx_packets),
         mp_obj_new_int(self->tx_responses),
         mp_obj_new_int(self->tx_failures),
         mp_obj_new_int(self->rx_packets),
-        mp_obj_new_int(self->dropped_rx_pkts),
-    };
-    return mp_obj_new_tuple(MP_ARRAY_SIZE(items), items);
+        mp_obj_new_int(self->dropped_rx_pkts));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_stats_obj, espnow_stats);
 
@@ -302,7 +302,7 @@ static mp_map_elem_t *_add_peer_to_table(
         mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN),
         MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
     if (item->value == MP_OBJ_NULL) {
-        // Create the tuple to hold the rssi and timestamp values
+        // Create the list to hold the rssi and timestamp values
         mp_obj_t items[2] = {mp_const_none, mp_const_none};
         item->value = mp_obj_new_list(2, items);
     }
@@ -542,11 +542,9 @@ STATIC mp_obj_t espnow_recv(size_t n_args, const mp_obj_t *args) {
 
     // Create and return a tuple of byte strings: (mac_addr, message)
     mp_map_elem_t *peer_item = _lookup_add_peer(self, pkt.peer);
-    mp_obj_t items[] = {
+    return NEW_TUPLE(
         peer_item->key,
-        mp_obj_new_str_from_vstr(&mp_type_bytes, &message),
-    };
-    return mp_obj_new_tuple(2, items);
+        mp_obj_new_str_from_vstr(&mp_type_bytes, &message));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recv_obj, 1, 2, espnow_recv);
 
@@ -661,24 +659,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 2, 4, espnow_send);
 
 // ### Peer Management Functions
 //
-
-// Return reference to the dictionary of peers we have seen:
-//   {peer1: (rssi, time_sec), peer2: (rssi, time_sec), ...}
-// where:
-//   peerX is a byte string containing the 6-byte mac address of the peer,
-//   rssi is the wifi signal strength from the last msg received
-//       (in dBm from -127 to 0)
-//   time_sec is the time in seconds since device last booted.
-STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
-    esp_espnow_obj_t *self = _get_singleton(0);
-    if (dest[0] == MP_OBJ_NULL) {   // Load
-        if (attr == MP_QSTR_peers) {
-            dest[0] = self->peers_table;
-        } else {
-            dest[1] = MP_OBJ_SENTINEL;
-        }
-    }
-}
 
 // Set the ESP-NOW Primary Master Key (pmk) (for encrypted communications).
 // Raise OSError if ESP-NOW functions are not initialised.
@@ -799,14 +779,12 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_mod_peer_obj, 2, espnow_mod_peer);
 // Convert a peer_info struct to python tuple
 // Used by espnow_get_peer() and espnow_get_peers()
 static mp_obj_t peer_info_to_tuple(const esp_now_peer_info_t *peer) {
-    return mp_obj_new_tuple(5,
-        (mp_obj_t[]) {
-        mp_obj_new_bytes(peer->peer_addr, sizeof(peer->peer_addr)),
-        mp_obj_new_bytes(peer->lmk, sizeof(peer->lmk)),
+    return NEW_TUPLE(
+        mp_obj_new_bytes(peer->peer_addr, MP_ARRAY_SIZE(peer->peer_addr)),
+        mp_obj_new_bytes(peer->lmk, MP_ARRAY_SIZE(peer->lmk)),
         mp_obj_new_int(peer->channel),
         mp_obj_new_int(peer->ifidx),
-        (peer->encrypt) ? mp_const_true : mp_const_false,
-    });
+        (peer->encrypt) ? mp_const_true : mp_const_false);
 }
 
 // ESPNow.get_peer(peer_mac): Get the peer info for peer_mac as a tuple.
@@ -869,57 +847,11 @@ STATIC mp_obj_t espnow_peer_count(mp_obj_t _) {
     esp_now_peer_num_t peer_num = {0};
     check_esp_err(esp_now_get_peer_num(&peer_num));
 
-    mp_obj_t items[] = {
+    return NEW_TUPLE(
         mp_obj_new_int(peer_num.total_num),
-        mp_obj_new_int(peer_num.encrypt_num),
-    };
-    return mp_obj_new_tuple(2, items);
+        mp_obj_new_int(peer_num.encrypt_num));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
-
-// Use dummy read and write functions for the buffer protocol
-STATIC mp_uint_t espnow_stream_read(mp_obj_t self_in, void *buf_in,
-    mp_uint_t max_size, int *errcode) {
-    mp_raise_NotImplementedError(MP_ERROR_TEXT("stream_read()"));
-}
-
-STATIC mp_uint_t espnow_stream_write(mp_obj_t self_in, const void *buf_in,
-    mp_uint_t max_size, int *errcode) {
-    mp_raise_NotImplementedError(MP_ERROR_TEXT("stream_write()"));
-}
-
-// Support MP_STREAM_POLL for asyncio
-STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
-    uintptr_t arg, int *errcode) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-    mp_uint_t ret;
-    if (request == MP_STREAM_POLL) {
-        mp_uint_t flags = arg;
-        ret = 0;
-        // Consider read ready when the incoming buffer is not empty
-        if ((flags & MP_STREAM_POLL_RD) && !buffer_empty(self->recv_buffer)) {
-            ret |= MP_STREAM_POLL_RD;
-        }
-        // Consider write ready when all sent packets have been acknowledged.
-        if ((flags & MP_STREAM_POLL_WR) &&
-            self->tx_responses >= self->tx_packets) {
-            ret |= MP_STREAM_POLL_WR;
-        }
-    } else {
-        *errcode = MP_EINVAL;
-        ret = MP_STREAM_ERROR;
-    }
-    return ret;
-}
-
-// Iterating over ESPNow returns tuples of (peer_addr, message)...
-STATIC mp_obj_t espnow_iternext(mp_obj_t self_in) {
-    esp_espnow_obj_t *self = _get_singleton(0);
-    if (self->recv_buffer == NULL) {
-        return MP_OBJ_STOP_ITERATION;
-    }
-    return espnow_irecv(1, &self_in);
-}
 
 STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_init), MP_ROM_PTR(&espnow_init_obj) },
@@ -954,12 +886,63 @@ STATIC const mp_rom_map_elem_t espnow_globals_dict_table[] = {
 };
 STATIC MP_DEFINE_CONST_DICT(espnow_globals_dict, espnow_globals_dict_table);
 
+// ### Dummy Buffer Protocol support
+// ...so asyncio can poll.ipoll() on this device
+
+// Support ioctl(MP_STREAM_POLL, ) for asyncio
+STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
+    uintptr_t arg, int *errcode) {
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
+    mp_uint_t ret;
+    if (request == MP_STREAM_POLL) {
+        mp_uint_t flags = arg;
+        ret = 0;
+        // Consider read ready when the incoming buffer is not empty
+        if ((flags & MP_STREAM_POLL_RD) && !buffer_empty(self->recv_buffer)) {
+            ret |= MP_STREAM_POLL_RD;
+        }
+        // Consider write ready when all sent packets have been acknowledged.
+        if ((flags & MP_STREAM_POLL_WR) &&
+            self->tx_responses >= self->tx_packets) {
+            ret |= MP_STREAM_POLL_WR;
+        }
+    } else {
+        *errcode = MP_EINVAL;
+        ret = MP_STREAM_ERROR;
+    }
+    return ret;
+}
+
 STATIC const mp_stream_p_t espnow_stream_p = {
-    .read = espnow_stream_read,
-    .write = espnow_stream_write,
     .ioctl = espnow_stream_ioctl,
-    .is_text = false,
 };
+
+// Return reference to the dictionary of peers we have seen:
+//   {peer1: (rssi, time_sec), peer2: (rssi, time_msec), ...}
+// where:
+//   peerX is a byte string containing the 6-byte mac address of the peer,
+//   rssi is the wifi signal strength from the last msg received
+//       (in dBm from -127 to 0)
+//   time_sec is the time in milliseconds since device last booted.
+STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    esp_espnow_obj_t *self = _get_singleton(0);
+    if (dest[0] == MP_OBJ_NULL) {   // Load
+        if (attr == MP_QSTR_peers) {
+            dest[0] = self->peers_table;
+        } else {
+            dest[1] = MP_OBJ_SENTINEL;
+        }
+    }
+}
+
+// Iterating over ESPNow returns tuples of (peer_addr, message)...
+STATIC mp_obj_t espnow_iternext(mp_obj_t self_in) {
+    esp_espnow_obj_t *self = _get_singleton(0);
+    if (self->recv_buffer == NULL) {
+        return MP_OBJ_STOP_ITERATION;
+    }
+    return espnow_irecv(1, &self_in);
+}
 
 const mp_obj_type_t esp_espnow_type = {
     { &mp_type_type },
