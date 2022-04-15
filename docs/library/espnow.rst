@@ -15,11 +15,11 @@ Table of Contents:
     - `Introduction`_
     - `Configuration`_
     - `Sending and Receiving Data`_
+    - `Receiving Data by Iteration - (ESP32 Only)`_
     - `Peer Management`_
-    - `Wifi Signal Strength (RSSI)`_
     - `Exceptions`_
     - `Constants - (ESP32 Only)`_
-    - `Iteration over ESPNow - (ESP32 Only)`_
+    - `Wifi Signal Strength (RSSI) - (ESP32 Only)`_
     - `Supporting asyncio - (ESP32 Only)`_
     - `Stream IO interface - (deprecated)`_
     - `Broadcast and Multicast`_
@@ -73,6 +73,7 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     # A WLAN interface must be active to send()/recv()
     w0 = network.WLAN(network.STA_IF)  # Or network.AP_IF
     w0.active(True)
+    w0.disconnect()   # For ESP8266
 
     e = espnow.ESPNow()
     e.init()
@@ -92,6 +93,7 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     # A WLAN interface must be active to send()/recv()
     w0 = network.WLAN(network.STA_IF)
     w0.active(True)
+    w0.disconnect()   # For ESP8266
 
     e = espnow.ESPNow()
     e.init()
@@ -215,6 +217,14 @@ For example::
 
     w0 = network.WLAN(network.STA_IF)
     w0.active(True)
+    w0.disconnect()    # For ESP8266
+
+**Note:** The ESP8266 has a *feature* that causes it to automatically reconnect
+to the last wifi Access Point when set `active(True)<network.WLAN.active>`
+(even after reboot/reset). As noted below, this reduces the reliability of
+receiving ESP-NOW messages. You can avoid this by calling
+`disconnect()<network.WLAN.disconnect>` after
+`active(True)<network.WLAN.active>`.
 
 .. method:: ESPNow.send(mac, msg[, sync])
             ESPNow.send(msg)   (ESP32 only)
@@ -346,6 +356,26 @@ For example::
     **Note**: Dropped packets will still be acknowledged to the sender as
     received.
 
+Receiving Data by Iteration - (ESP32 Only)
+------------------------------------------
+
+It is also possible to read messages by iterating over the ESPNow singleton
+object. This will yield ``(mac, message)`` tuples using the alloc-free
+`irecv()` method, eg::
+
+    for mac, msg in e:
+        print(f"Recv: mac={mac}, message={msg}")
+        if msg == b"!halt":
+            e.deinit()
+
+The iteration will continue while ``e`` remains initialised. That is, if you
+call `deinit()<ESPNow.deinit()>` (or fail to call `init()<ESPNow.init()>`
+before entering the loop), a ``StopIteration`` exception will be raised and
+the for loop will exit.
+
+**Note**: Iteration will yield ``(None, None)`` if the default timeout expires
+while waiting for a message.
+
 Peer Management
 ---------------
 
@@ -362,7 +392,8 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     **Note:** messages will only be encrypted if ``lmk`` is also set in
     `ESPNow.add_peer()` (see `Security
     <https://docs.espressif.com/projects/esp-idf/en/latest/
-    esp32/api-reference/network/esp_now.html#security>`_).
+    esp32/api-reference/network/esp_now.html#security>`_ in the Espressif API
+    docs).
 
     .. data:: Arguments:
 
@@ -473,13 +504,47 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     address. Parameters may be provided as positional or keyword arguments
     (see `ESPNow.add_peer()`).
 
-Wifi Signal Strength (RSSI)
----------------------------
+Constants - (ESP32 Only)
+------------------------
+
+.. data:: espnow.MAX_DATA_LEN(=250)
+          espnow.KEY_LEN(=16)
+          espnow.MAX_TOTAL_PEER_NUM(=20)
+          espnow.MAX_ENCRYPT_PEER_NUM(=6)
+
+Exceptions
+----------
+
+If the underlying Espressif ESPNow software stack returns an error code,
+the micropython ESPNow module will raise an ``OSError(errnum, errstring)``
+exception where ``errstring`` is set to the name of one of the error codes
+identified in the
+`Espressif ESP-Now docs
+<https://docs.espressif.com/projects/esp-idf/en/latest/
+api-reference/network/esp_now.html#api-reference>`_. For example::
+
+    try:
+        e.send(peer, 'Hello')
+    except OSError as err:
+        if len(err.args) < 2:
+            raise err
+        if err.args[1] == 'ESP_ERR_ESPNOW_NOT_INIT':
+            e.init()
+        elif err.args[1] == 'ESP_ERR_ESPNOW_NOT_FOUND':
+            e.add_peer(peer)
+        elif err.args[1] == 'ESP_ERR_ESPNOW_IF':
+            network.WLAN(network.STA_IF).active(True)
+        else:
+            raise err
+
+Wifi Signal Strength (RSSI) - (ESP32 only)
+------------------------------------------
 
 The ESPnow module maintains a **peer device table** which contains the signal
 strength of the last received message for all known peers. The **peer device
 table** can be accessed using `ESPNow.peers` and can be used to track device
-proximity and identify *nearest neighbours* in a network of peer devices.
+proximity and identify *nearest neighbours* in a network of peer devices. This
+feature is **not** available on ESP8266 devices.
 
 .. data:: ESPNow.peers
 
@@ -513,64 +578,13 @@ proximity and identify *nearest neighbours* in a network of peer devices.
     first message(s) from unregistered peers will be lost (until the peer is
     added to the table). RSSI values for subsequent messages will be recorded.
 
-Exceptions
-----------
-
-If the underlying Espressif ESPNow software stack returns an error code,
-the micropython ESPNow module will raise an ``OSError(errnum, errstring)``
-exception where ``errstring`` is set to the name of one of the error codes
-identified in the
-`Espressif ESP-Now docs
-<https://docs.espressif.com/projects/esp-idf/en/latest/
-api-reference/network/esp_now.html#api-reference>`_. For example::
-
-    try:
-        e.send(peer, 'Hello')
-    except OSError as err:
-        if len(err.args) < 2:
-            raise err
-        if err.args[1] == 'ESP_ERR_ESPNOW_NOT_INIT':
-            e.init()
-        elif err.args[1] == 'ESP_ERR_ESPNOW_NOT_FOUND'
-            e.add_peer(peer)
-        elif err.args[1] == 'ESP_ERR_ESPNOW_IF'
-            network.WLAN(network.STA_IF).active(True)
-        else:
-            raise err
-
-Constants - (ESP32 Only)
-------------------------
-
-.. data:: espnow.MAX_DATA_LEN(=250)
-          espnow.KEY_LEN(=16)
-          espnow.MAX_TOTAL_PEER_NUM(=20)
-          espnow.MAX_ENCRYPT_PEER_NUM(=6)
-
-Iteration over ESPNow - (ESP32 Only)
-------------------------------------
-
-It is also possible to read messages by iterating over the ESPNow singleton
-object. This will yield ``(mac, message)`` tuples using the alloc-free
-`irecv()` method, eg::
-
-    for mac, msg in e:
-        print(f"Recv: mac={mac}, message={msg}")
-
-The iteration will continue while ``e`` remains initialised. That is, if you
-call `deinit()<ESPNow.deinit()>` (or fail to call `init()<ESPNow.init()>`
-before entering the loop), a ``StopIteration`` exception will be raised and
-the for loop will exit.
-
-**Note**: Iteration will yield ``(None, None)`` if the default timeout expires
-while waiting for a message.
-
 Supporting asyncio - (ESP32 Only)
 ---------------------------------
 
-A supplementary module (`aioespnow`) is available to provide :doc:`uasyncio`
-support.
+A supplementary module (`aioespnow`) is available to provide
+:doc:`uasyncio<uasyncio>` support.
 
-A toy async server example::
+A small async server example::
 
     import network
     import aioespnow as espnow
@@ -579,7 +593,7 @@ A toy async server example::
     # A WLAN interface must be active to send()/recv()
     network.WLAN(network.STA_IF).active(True)
 
-    e = espnow.ESPNow()       # ESPNow enhanced with async support
+    e = espnow.ESPNow()  # Returns AIOESPNow enhanced with async support
     e.init()
     peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'
     e.add_peer(peer)
@@ -627,7 +641,7 @@ A toy async server example::
     Asyncio support for `ESPNow.recv()` and `ESPNow.irecv()`. Note that
     these methods do not take a timeout value as argument.
 
-.. method:: async AIOESPNow.asend(mac, msg=None, sync=True)
+.. method:: async AIOESPNow.asend(mac, msg, sync=True)
             async AIOESPNow.asend(msg)
 
     Asyncio support for `ESPNow.send()`.
@@ -646,7 +660,6 @@ async support::
 
 **Snippet:** Use `AIOESPNow` as stand-in for `ESPNow<espnow.ESPNow>`::
 
-    from esp import espnow
     from aioespnow import AIOESPNow
     import uasyncio as asyncio
 
@@ -674,8 +687,7 @@ async support::
     ...
 
 `AIOESPNow` also supports reading incoming messages by asynchronous
-iteration over the `AIOESPNow` singleton object using ``async for``,
-eg::
+iteration using ``async for``, eg::
 
     e = AIOESPNow()
     e.init()
@@ -715,7 +727,11 @@ address or any multicast address.
 **Note**: `ESPNow.send(None, msg)<ESPNow.send()>` will send to all registered
 peers *except* the broadcast address. To send a broadcast or multicast
 message, you must specify the ``broadcast`` (or multicast) MAC address as the
-peer.
+peer. For example::
+
+    bcast = b'\xff' * 6
+    e.add_peer(bcast)
+    e.send(bcast, "Hello World!")
 
 ESPNow and Wifi Operation
 -------------------------
@@ -746,7 +762,7 @@ in configuring ESPNow and Wifi networks.
 
 Sending ESPNow packets to a STA_IF interface which is also connected to a wifi
 access point (AP) can be unreliable due to the default power saving mode
-(WIFI_PS_MIN_MODEM) of the ESP32 when connected to an AP.
+(WIFI_PS_MIN_MODEM) of the ESP32 when connected to an external Access Point.
 
 There are several options to improve reliability of receiving ESPNow packets
 when also connected to a wifi network:
@@ -828,8 +844,8 @@ Other issues to take care with when using ESPNow with wifi are:
 
 - Some versions of the ESP IDF don't permit setting the channel of the STA_IF
   at all, other than by connecting to an Access Point (This seems to be fixed
-  in IDF 4+). Micropython versions without the ESPNow patches also disallow
-  setting the channel of the STA_IF.
+  in IDF 4+). Micropython versions without the ESPNow patches also provide no
+  support for setting the channel of the STA_IF.
 
 ESPNow and Sleep Modes
 ----------------------
