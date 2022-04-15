@@ -2,6 +2,7 @@
 # This test works with ESP32 or ESP8266 as server or client.
 
 try:
+    import micropython
     import network
     import random
     from esp import espnow
@@ -17,8 +18,12 @@ sync = True
 
 def echo_server(e):
     peers = []
+    i = 0
     while True:
         peer, msg = e.irecv(timeout)
+        i += 1
+        if i % 10 == 0:
+            print("OK:", i)
         if peer is None:
             return
         if peer not in peers:
@@ -35,7 +40,6 @@ def echo_server(e):
 
 
 def echo_test(e, peer, msg, sync):
-    print("TEST: send/recv(msglen=", len(msg), ",sync=", sync, "): ", end="", sep="")
     try:
         if not e.send(peer, msg, sync):
             print("ERROR: Send failed.")
@@ -46,11 +50,12 @@ def echo_test(e, peer, msg, sync):
         return
 
     p2, msg2 = e.irecv(timeout)
-    print("OK" if msg2 == msg else "ERROR: Received != Sent")
+    if msg2 != msg:
+        print("ERROR: Received != Sent")
 
 
 def echo_client(e, peer, msglens):
-    for sync in [True, False]:
+    for sync in [True]:
         for msglen in msglens:
             msg = bytearray(msglen)
             if msglen > 0:
@@ -67,7 +72,7 @@ def init(sta_active=True, ap_active=False):
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
-    wlans[0].disconnect()   # Force esp8266 STA interface to disconnect from AP
+    wlans[0].disconnect()  # Force esp8266 STA interface to disconnect from AP
     return e
 
 
@@ -88,6 +93,17 @@ def instance1():
     multitest.next()
     peer = PEERS[0]
     e.add_peer(peer)
-    echo_client(e, peer, [1, 2, 8, 100, 249, 250, 251, 0])
+    echo_test(e, peer, b"ping", True)
+    gc.collect()
+    mem_start = gc.mem_alloc()
+    for i in range(10):
+        echo_client(e, peer, [250] * 10)
+        print("OK:", (i + 1) * 10)
     echo_test(e, peer, b"!done", True)
+    gc.collect()
+    mem_end = gc.mem_alloc()
+    if (mem_end - mem_start < 500):
+        print("OK: Less than 500 bytes consumed")
+    else:
+        print("Error: Memory consumed is", mem_end - mem_start)
     e.deinit()
