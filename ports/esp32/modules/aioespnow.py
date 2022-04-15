@@ -27,21 +27,20 @@ class AIOESPNow(espnow.ESPNow):
     # Read one ESPNow message
     async def arecv(self):
         yield uasyncio.core._io_queue.queue_read(self)
-        return super().recv(0)
+        return self.recv(0)
 
     async def airecv(self):
         yield uasyncio.core._io_queue.queue_read(self)
-        return super().irecv(0)
+        return self.irecv(0)
 
     async def asend(self, mac, msg=None, sync=True):
         if msg is None:
             msg, mac = mac, None  # If msg is None: swap mac and msg
         yield uasyncio.core._io_queue.queue_write(self)
-        return super().send(mac, msg, sync)
+        return self.send(mac, msg, sync)
 
     # async for support
     def __aiter__(self):
-        self.init()
         return self
 
     async def __anext__(self):
