@@ -62,24 +62,25 @@
 static const uint8_t ESPNOW_MAGIC = 0x99;
 
 // ESPNow packet format for the receive buffer.
-typedef struct {
-    uint8_t magic;              // = ESPNOW_MAGIC
-    uint8_t msg_len;            // Length of the message
-    uint8_t peer[6];            // Peer address
-    uint8_t msg[0];             // Message is up to 250 bytes
-} __attribute__((packed)) espnow_pkt_t;
-
 // Use this for peeking at the header of the next packet in the buffer.
 typedef struct {
     uint8_t magic;              // = ESPNOW_MAGIC
     uint8_t msg_len;            // Length of the message
+    uint32_t timestamp_ms;      // Timestamp (ms) when packet is received
+    int8_t rssi;                // RSSI value (dBm) (-127 to 0)
 } __attribute__((packed)) espnow_hdr_t;
+
+typedef struct {
+    espnow_hdr_t hdr;           // The header
+    uint8_t peer[6];            // Peer address
+    uint8_t msg[0];             // Message is up to 250 bytes
+} __attribute__((packed)) espnow_pkt_t;
 
 // The maximum length of an espnow packet (bytes)
 static const size_t MAX_PACKET_LEN = (
     (sizeof(espnow_pkt_t) + ESP_NOW_MAX_DATA_LEN));
 
-// Enough for 2 full-size packets: 2 * (6 + 2 + 250) = 516 bytes
+// Enough for 2 full-size packets: 2 * (6 + 7 + 250) = 526 bytes
 // Will allocate an additional 7 bytes for buffer overhead
 static const size_t DEFAULT_RECV_BUFFER_SIZE = (2 * MAX_PACKET_LEN);
 
@@ -291,57 +292,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_stats_obj, espnow_stats);
 //   application memory usage and peer handling.
 // - In future we can also efficiently support recv buffers for each host.
 
-// Add a new peer mac address to the peers table.
-// Returns a reference to the peer item in the table.
-static mp_map_elem_t *_add_peer_to_table(
-    esp_espnow_obj_t *self, const uint8_t *peer) {
-
-    // Add the peer to the peers table (or get if existing)
-    mp_map_elem_t *item = mp_map_lookup(
-        mp_obj_dict_get_map(self->peers_table),
-        mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN),
-        MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
-    if (item->value == MP_OBJ_NULL) {
-        // Create the list to hold the rssi and timestamp values
-        mp_obj_t items[2] = {mp_const_none, mp_const_none};
-        item->value = mp_obj_new_list(2, items);
-    }
-    return item;
-}
-
-// Lookup a peer in the peers table and return a reference to the item in the
-// peers_table. This is invoked from recv_cb() and must not allocate memory!!
-static mp_map_elem_t *_lookup_peer(
-    esp_espnow_obj_t *self, const uint8_t *peer) {
-
-    // We do not want to allocate any new memory in the case that the peer
-    // already exists in the peers_table (which is almost all the time).
-    // So, we use a byte string on the stack and look that up in the dict.
-    // Warning - depends on internal representation of mp_obj_str_t.
-    mp_obj_str_t peer_obj = {  // A byte string on the stack holding peer addr
-        .base = {&mp_type_bytes},
-        .hash = 0, // Don't pre-compute the hash as mp_map_lookup recomputes it
-        .len = ESP_NOW_ETH_ALEN,
-        .data = peer,
-    };
-    return mp_map_lookup(
-        mp_obj_dict_get_map(self->peers_table), &peer_obj, MP_MAP_LOOKUP);
-}
-
-// Lookup a peer in the peers table and return a reference to the item in the
-// peers_table. Add peer to the table if it is not found (may alloc memory).
-static mp_map_elem_t *_lookup_add_peer(
-    esp_espnow_obj_t *self, const uint8_t *peer) {
-
-    // First lookup the item without allocating new memory
-    mp_map_elem_t *peer_item = _lookup_peer(self, peer);
-    if (peer_item == NULL) {
-        // If not found - add the peer to the table
-        peer_item = _add_peer_to_table(self, peer);
-    }
-    return peer_item;
-}
-
 // Get the RSSI value from the wifi packet header
 static inline int8_t _get_rssi_from_wifi_pkt(const uint8_t *msg) {
     // This struct is solely to support backtracking to get the rssi of msgs
@@ -379,29 +329,66 @@ static inline int8_t _get_rssi_from_wifi_pkt(const uint8_t *msg) {
     wifi_promiscuous_pkt_t *wifi_pkt = (wifi_promiscuous_pkt_t *)(
         msg - sizeof(espnow_frame_format_t) - sizeof(wifi_promiscuous_pkt_t));
 
+    #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 2, 0)
+    return wifi_pkt->rx_ctrl.rssi - 100;  // Offset rssi for IDF 4.0.2
+    #else
     return wifi_pkt->rx_ctrl.rssi;
+    #endif
 }
 
+// Lookup a peer in the peers table and return a reference to the item in the
+// peers_table. Add peer to the table if it is not found (may alloc memory).
+// Will not return NULL.
+static mp_map_elem_t *_lookup_add_peer(
+    esp_espnow_obj_t *self, const uint8_t *peer) {
+
+    // We do not want to allocate any new memory in the case that the peer
+    // already exists in the peers_table (which is almost all the time).
+    // So, we use a byte string on the stack and look that up in the dict.
+    // Warning - depends on internal representation of mp_obj_str_t.
+    mp_obj_str_t peer_obj = {  // A byte string on the stack holding peer addr
+        .base = {&mp_type_bytes},
+        .hash = 0, // Don't pre-compute the hash as mp_map_lookup recomputes it
+        .len = ESP_NOW_ETH_ALEN,
+        .data = peer, // Points to memory on the stack
+    };
+    mp_map_t *map = mp_obj_dict_get_map(self->peers_table);
+    // First lookup the peer without allocating new memory
+    mp_map_elem_t *item = mp_map_lookup(map, &peer_obj, MP_MAP_LOOKUP);
+    if (item == NULL) {
+        // If not found, add the peer using a new bytestring
+        item = mp_map_lookup(map,
+            mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN),
+            MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+    }
+    return item;
+}
 
 // Update the peers table with the new rssi value from a received pkt and
 // return a reference to the item in the peers_table.
-// Must not allocate new memory (will be called from recv_cb()).
 static mp_map_elem_t *_update_rssi(
-    esp_espnow_obj_t *self, const uint8_t *peer, const uint8_t *msg) {
+    esp_espnow_obj_t *self, const uint8_t *peer,
+    int8_t rssi, uint32_t timestamp_ms) {
 
-    mp_map_elem_t *item = _lookup_peer(self, peer);
-    if (item != NULL) {
-        // Update the values in the tuple entry!
-        // item->key = peer MAC Address (byte string)
-        // item->value = [rssi, timestamp_ms]
-        int8_t rssi = _get_rssi_from_wifi_pkt(msg);
-        mp_obj_list_t *list = MP_OBJ_TO_PTR(item->value);
-        if (mp_obj_is_type(list, &mp_type_list) && list->len >= 2) {
-            // Check we have a valid list before updating...
-            list->items[0] = MP_OBJ_NEW_SMALL_INT(rssi);
-            list->items[1] = MP_OBJ_NEW_SMALL_INT(mp_hal_ticks_ms());
-        }
+    // Lookup the peer in the device table
+    mp_map_elem_t *item = _lookup_add_peer(self, peer);
+
+    // Ensure the item value is a list with at least 2 entries
+    mp_obj_list_t *list = MP_OBJ_TO_PTR(item->value);
+    if (list == NULL ||
+        !mp_obj_is_type(list, &mp_type_list) ||
+        list->len < 2) {
+        item->value = mp_obj_new_list(2,
+            (mp_obj_t [2]) {mp_const_none, mp_const_none});
+        list = MP_OBJ_TO_PTR(item->value);
     }
+
+    // Update the values
+    // item->key = peer MAC Address (byte string)
+    // item->value = [rssi, timestamp_ms]
+    list->items[0] = MP_OBJ_NEW_SMALL_INT(rssi);
+    list->items[1] = MP_OBJ_NEW_SMALL_INT(timestamp_ms);
+
     return item;
 }
 
@@ -410,7 +397,7 @@ static mp_map_elem_t *_update_rssi(
 
 // Callback triggered when a sent packet is acknowledged by the peer (or not).
 // Just count the number of responses and number of failures.
-// These are used in the send()/write() logic.
+// These are used in the send() logic.
 STATIC void send_cb(
     const uint8_t *mac_addr, esp_now_send_status_t status) {
 
@@ -438,12 +425,13 @@ STATIC void recv_cb(
     espnow_hdr_t header;
     header.magic = ESPNOW_MAGIC;
     header.msg_len = msg_len;
+    header.rssi = _get_rssi_from_wifi_pkt(msg);
+    header.timestamp_ms = mp_hal_ticks_ms();
 
     buffer_put(buf, &header, sizeof(header));
     buffer_put(buf, mac_addr, ESP_NOW_ETH_ALEN);
     buffer_put(buf, msg, msg_len);
     self->rx_packets++;
-    _update_rssi(self, mac_addr, msg);
     if (self->recv_cb != mp_const_none) {
         mp_sched_schedule(self->recv_cb, self);
     }
@@ -452,24 +440,38 @@ STATIC void recv_cb(
 // ### Handling espnow packets in the recv buffer
 //
 
-// Check the packet header provided and return the packet length.
-// Raises ValueError if the header is bad or the packet is larger than max_size.
-// Bypass the size check if max_size == 0.
-// Returns the packet length in bytes (including header).
-static int _check_packet_length(espnow_hdr_t *header, size_t max_size) {
-    if (header->magic != ESPNOW_MAGIC ||
-        header->msg_len > ESP_NOW_MAX_DATA_LEN) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Bad packet"));
-    }
-    int pkt_len = header->msg_len + sizeof(espnow_pkt_t);
-    if (max_size > 0 && max_size < pkt_len) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Buffer too small for packet"));
-    }
-    return pkt_len;
-}
-
 // ### Send and Receive ESP_Now data
 //
+
+// Wait for a message to arrive in the buffer and read out the packet header.
+// Also checks the packet header and updates the rssi values in the device
+// table. This is the code that is common to espnow_irecv() and espnow_recv().
+// Returns: Length of the message to read (or 0 on timeout)
+// Raises: ValueError if the header format is bad.
+static int _recv_hdr(size_t n_args, const mp_obj_t *args, mp_obj_t *peer) {
+
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
+
+    size_t timeout_ms = (
+        (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
+
+    // Read the packet header from the incoming buffer
+    espnow_pkt_t pkt;
+    if (!buffer_recv(self->recv_buffer, &pkt, sizeof(pkt), timeout_ms)) {
+        return 0;    // Timeout waiting for packet
+    }
+    // Check the message packet header format
+    if (pkt.hdr.magic != ESPNOW_MAGIC ||
+        pkt.hdr.msg_len > ESP_NOW_MAX_DATA_LEN) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Bad packet"));
+    }
+
+    // Update the rssi value in device table and use the dict key as peer
+    *peer = _update_rssi(
+        self, pkt.peer, pkt.hdr.rssi, pkt.hdr.timestamp_ms)->key;
+
+    return pkt.hdr.msg_len;
+}
 
 // ESPNow.irecv([timeout]):
 // Like ESPNow.recv() but returns a "callee-owned" tuple of byte strings.
@@ -482,29 +484,20 @@ static int _check_packet_length(espnow_hdr_t *header, size_t max_size) {
 STATIC mp_obj_t espnow_irecv(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
-    size_t timeout_ms = (
-        (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
-
-    // Read the packet header from the incoming buffer
     mp_obj_array_t *msg = MP_OBJ_TO_PTR(self->irecv_tuple->items[1]);
-    espnow_pkt_t pkt;
-    if (!buffer_recv(self->recv_buffer, &pkt, sizeof(pkt), timeout_ms)) {
-        msg->len = 0;               // Set callee-owned msg bytearray to empty.
+    mp_obj_t peer = MP_OBJ_NULL;
+    msg->len = 0;
+    msg->len = _recv_hdr(n_args, args, &peer);
+    if (msg->len == 0) {
         return self->none_tuple;    // Timeout waiting for packet
     }
-    int msg_len = _check_packet_length(
-        (espnow_hdr_t *)&pkt, 0) - sizeof(espnow_pkt_t);
+    self->irecv_tuple->items[0] = peer;
 
     // Now read the message into the byte string.
-    if (!buffer_get(self->recv_buffer, msg->items, msg_len)) {
+    if (!buffer_get(self->recv_buffer, msg->items, msg->len)) {
         mp_raise_ValueError(MP_ERROR_TEXT("Buffer error"));
     }
 
-    // Update the peer in the peers table and return the key of the
-    // key-value pair as the canonical peer address.
-    mp_map_elem_t *peer_item = _lookup_add_peer(self, pkt.peer);
-    self->irecv_tuple->items[0] = peer_item->key;
-    msg->len = msg_len;
     return MP_OBJ_FROM_PTR(self->irecv_tuple);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_irecv_obj, 1, 2, espnow_irecv);
@@ -518,33 +511,24 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_irecv_obj, 1, 2, espnow_irecv)
 STATIC mp_obj_t espnow_recv(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
-    size_t timeout_ms = (
-        (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
-
-    // Read the packet header from the incoming buffer
-    espnow_pkt_t pkt;
-    if (!buffer_recv(self->recv_buffer, &pkt, sizeof(pkt), timeout_ms)) {
-        return self->none_tuple;       // Buffer is empty
+    mp_obj_t peer;
+    int msg_len = _recv_hdr(n_args, args, &peer);
+    if (msg_len == 0) {
+        return self->none_tuple;    // Timeout waiting for packet
     }
-    int msg_len = _check_packet_length(
-        (espnow_hdr_t *)&pkt, 0) - sizeof(espnow_pkt_t);
 
     // Allocate vstr as new storage buffers for the message.
     // The storage will be handed over to mp_obj_new_str_from_vstr() below.
-    vstr_t message;
-    vstr_init_len(&message, msg_len);
-
+    vstr_t msg;
+    vstr_init_len(&msg, msg_len);
     // Now read the peer_address and message into the byte strings.
-    if (!buffer_get(self->recv_buffer, message.buf, msg_len)) {
-        vstr_clear(&message);
+    if (!buffer_get(self->recv_buffer, msg.buf, msg_len)) {
+        vstr_clear(&msg);
         mp_raise_ValueError(MP_ERROR_TEXT("Buffer error"));
     }
 
     // Create and return a tuple of byte strings: (mac_addr, message)
-    mp_map_elem_t *peer_item = _lookup_add_peer(self, pkt.peer);
-    return NEW_TUPLE(
-        peer_item->key,
-        mp_obj_new_str_from_vstr(&mp_type_bytes, &message));
+    return NEW_TUPLE(peer, mp_obj_new_str_from_vstr(&mp_type_bytes, &msg));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recv_obj, 1, 2, espnow_recv);
 
@@ -737,7 +721,6 @@ STATIC void _update_peer_count() {
 // Return None.
 STATIC mp_obj_t espnow_add_peer(
     size_t n_args, const mp_obj_t *args, mp_map_t *kw_args) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
     esp_now_peer_info_t peer = {0};
     memcpy(peer.peer_addr, _get_peer(args[1]), ESP_NOW_ETH_ALEN);
@@ -745,8 +728,6 @@ STATIC mp_obj_t espnow_add_peer(
 
     check_esp_err(esp_now_add_peer(&peer));
     _update_peer_count();
-    // Add to the peer device table: self->peers_table
-    _add_peer_to_table(self, peer.peer_addr);
 
     return mp_const_none;
 }
