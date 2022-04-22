@@ -559,7 +559,7 @@ feature is **not** available on ESP8266 devices.
     - ``rssi`` is the wifi signal strength in dBm (-127 to 0) of the last
       message received from the peer; and
     - ``time_ms`` is the time the message was received (in milliseconds since
-      system boot - wraps every 6 days).
+      system boot - wraps every 12 days).
 
     Example::
 
@@ -570,13 +570,9 @@ feature is **not** available on ESP8266 devices.
     **Note**: the ``mac`` addresses returned by `recv()` and `irecv()` are
     references to the ``peer`` key values in the **peer device table**.
 
-    **Note**: RSSI values of peers are only saved if the peer is already
-    registered in the **peer device table**. New peers are added to the table
-    when the first packet from the peer is processed by `ESPNow.irecv()` or
-    `ESPNow.recv()`. Initially, the table will have an entry for the peer like
-    ``{peer: [None, None]}`` until more messages arrive. So, RSSI values of the
-    first message(s) from unregistered peers will be lost (until the peer is
-    added to the table). RSSI values for subsequent messages will be recorded.
+    **Note**: RSSI and timestamp values in the device table are updated only
+    when `ESPNow.irecv()` or `ESPNow.recv()` are called to read out the
+    incoming message.
 
 Supporting asyncio - (ESP32 Only)
 ---------------------------------
