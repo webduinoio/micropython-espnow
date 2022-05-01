@@ -51,10 +51,6 @@
 #include "shared/runtime/ring_buffer.h"
 #include "esp_espnow.h"
 
-#ifndef MICROPY_ESPNOW_BUFFER_PROTOCOL
-#define MICROPY_ESPNOW_BUFFER_PROTOCOL          (0)
-#endif
-
 // Relies on gcc Variadic Macros and Statement Expressions
 #define NEW_TUPLE(...) \
     ({mp_obj_t _z[] = {__VA_ARGS__}; mp_obj_new_tuple(MP_ARRAY_SIZE(_z), _z); })
@@ -167,6 +163,8 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
 
     self->recv_cb = mp_const_none;
     self->peers_table = mp_obj_new_dict(0);
+    // Prevent user code modifying the dict
+    mp_obj_dict_get_map(self->peers_table)->is_fixed = 1;
 
     // Set the global singleton pointer for the espnow protocol.
     MP_STATE_PORT(espnow_singleton) = self;
@@ -253,10 +251,7 @@ STATIC mp_obj_t espnow_config(
     // Return the value of the requested parameter
     uintptr_t name = (uintptr_t)args[ARG_get].u_obj;
     if (name == QS(MP_QSTR_rxbuf)) {
-        return mp_obj_new_int(
-            (self->recv_buffer
-                ? buffer_size(self->recv_buffer)
-                : self->recv_buffer_size));
+        return mp_obj_new_int(self->recv_buffer_size);
     } else if (name == QS(MP_QSTR_timeout)) {
         return mp_obj_new_int(self->recv_timeout_ms);
     } else if (name == QS(MP_QSTR_on_recv)) {
@@ -357,9 +352,11 @@ static mp_map_elem_t *_lookup_add_peer(
     mp_map_elem_t *item = mp_map_lookup(map, &peer_obj, MP_MAP_LOOKUP);
     if (item == NULL) {
         // If not found, add the peer using a new bytestring
+        map->is_fixed = 0;      // Allow to modify the dict
         item = mp_map_lookup(map,
             mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN),
             MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+        map->is_fixed = 1;
     }
     return item;
 }
