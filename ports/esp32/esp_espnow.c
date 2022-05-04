@@ -187,7 +187,7 @@ STATIC mp_obj_t espnow_init(mp_obj_t _) {
         self->recv_buffer = buffer_init(self->recv_buffer_size);
         self->recv_buffer_size = buffer_size(self->recv_buffer);
 
-        esp_initialise_wifi();  // Call the wifi init code in network_wifi.c
+        esp_initialise_wifi();  // Call the wifi init code in network_wlan.c
         check_esp_err(esp_now_init());
         check_esp_err(esp_now_register_recv_cb(recv_cb));
         check_esp_err(esp_now_register_send_cb(send_cb));
@@ -224,11 +224,12 @@ STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     esp_espnow_obj_t *self = _get_singleton(0);
-    enum { ARG_get, ARG_rxbuf, ARG_timeout, ARG_on_recv };
+    enum { ARG_get, ARG_rxbuf, ARG_timeout, ARG_rate, ARG_on_recv };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_get, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_rxbuf, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_on_recv, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -240,6 +241,17 @@ STATIC mp_obj_t espnow_config(
     }
     if (args[ARG_timeout].u_int >= 0) {
         self->recv_timeout_ms = args[ARG_timeout].u_int;
+    }
+    if (args[ARG_rate].u_int >= 0) {
+        #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
+        esp_initialise_wifi();  // Call the wifi init code in network_wlan.c
+        check_esp_err(esp_wifi_config_espnow_rate(
+            ESP_IF_WIFI_STA, args[ARG_rate].u_int));
+        check_esp_err(esp_wifi_config_espnow_rate(
+            ESP_IF_WIFI_AP, args[ARG_rate].u_int));
+        #else
+        mp_raise_ValueError(MP_ERROR_TEXT("rate option not supported"));
+        #endif
     }
     if (args[ARG_on_recv].u_obj != MP_OBJ_NULL) {
         self->recv_cb = args[ARG_on_recv].u_obj;
