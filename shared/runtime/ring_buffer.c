@@ -148,7 +148,7 @@ RB_STATIC bool buffer_recv(
 
     int64_t start = mp_hal_ticks_ms();
     while (!buffer_get(buffer, data, len)) {
-        if (mp_hal_ticks_ms() - start >= timeout_ms) {
+        if (timeout_ms >= 0 && mp_hal_ticks_ms() - start >= timeout_ms) {
             return false;
         }
         mp_hal_delay_ms(BUSY_WAIT_MS);
@@ -163,7 +163,7 @@ RB_STATIC bool buffer_send(
 
     int64_t start = mp_hal_ticks_ms();
     while (!buffer_put(buffer, data, len)) {
-        if (mp_hal_ticks_ms() - start >= timeout_ms) {
+        if (timeout_ms >= 0 && mp_hal_ticks_ms() - start >= timeout_ms) {
             return false;
         }
         mp_hal_delay_ms(BUSY_WAIT_MS);

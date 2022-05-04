@@ -281,7 +281,8 @@ receiving ESP-NOW messages. You can avoid this by calling
 
         ``timeout`` optionally sets a timeout (in milliseconds) for the read.
         The default timeout (5 minutes) can be set using `ESPNow.config()` on
-        the ESP32 or `ESPNow.init()` on the ESP8266.
+        the ESP32 or `ESPNow.init()` on the ESP8266. If ``timeout`` is less than
+        zero, then wait forever.
 
     .. data:: Returns:
 
