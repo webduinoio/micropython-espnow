@@ -185,6 +185,11 @@ Configuration
         milliseconds). The timeout can also be provided as arg to `recv()` and
         `irecv()`.
 
+        ``rate``: Set the transmission speed for espnow packets. Must be set to
+        a number from the allowed numeric values in `enum wifi_phy_rate_t
+        <https://docs.espressif.com/projects/esp-idf/en/v4.4.1/esp32/
+        api-reference/network/esp_wifi.html#_CPPv415wifi_phy_rate_t>`_.
+
         ``on_recv``: *(default=None)* Get/set a callback function to be called
         *as soon as possible* after a message has been received from another
         ESPNow device. The function will be called with the espnow object as an
