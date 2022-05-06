@@ -151,12 +151,12 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
 
     // Allocate and initialise the "callee-owned" tuples for irecv().
     // Build a tuple (peer, msg). Where peer will be a reference
-    // to the peer mac address in the peers table and msg is a bytearray
+    // to the peer mac address in the peers table and msg is a byte string
     // to hold a copy of the message from the packet buffer.
+    byte tmp[ESP_NOW_MAX_DATA_LEN] = {0};
     self->irecv_tuple = NEW_TUPLE(
         mp_const_none,
-        mp_obj_new_bytearray(ESP_NOW_MAX_DATA_LEN,
-            m_malloc(ESP_NOW_MAX_DATA_LEN)));
+        mp_obj_new_bytes(tmp, MP_ARRAY_SIZE(tmp)));
     self->none_tuple = NEW_TUPLE(
         mp_const_none,
         mp_const_none);
@@ -368,7 +368,7 @@ static mp_map_elem_t *_lookup_add_peer(
         item = mp_map_lookup(map,
             mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN),
             MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
-        map->is_fixed = 1;
+        map->is_fixed = 1;      // Relock the dict
     }
     return item;
 }
@@ -493,17 +493,18 @@ static int _recv_hdr(size_t n_args, const mp_obj_t *args, mp_obj_t *peer) {
 STATIC mp_obj_t espnow_irecv(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
-    mp_obj_array_t *msg = MP_OBJ_TO_PTR(self->irecv_tuple->items[1]);
-    mp_obj_t peer = MP_OBJ_NULL;
+    // Initialise the callee-owned irecv_tuple in case exception is raised
+    self->irecv_tuple->items[0] = mp_const_none;
+    mp_obj_str_t *msg = MP_OBJ_TO_PTR(self->irecv_tuple->items[1]);
+    msg->hash = 0;
     msg->len = 0;
-    msg->len = _recv_hdr(n_args, args, &peer);
+    msg->len = _recv_hdr(n_args, args, &self->irecv_tuple->items[0]);
     if (msg->len == 0) {
         return self->none_tuple;    // Timeout waiting for packet
     }
-    self->irecv_tuple->items[0] = peer;
 
     // Now read the message into the byte string.
-    if (!buffer_get(self->recv_buffer, msg->items, msg->len)) {
+    if (!buffer_get(self->recv_buffer, (byte *)msg->data, msg->len)) {
         mp_raise_ValueError(MP_ERROR_TEXT("Buffer error"));
     }
 
