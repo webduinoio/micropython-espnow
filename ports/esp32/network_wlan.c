@@ -47,7 +47,7 @@
 #error WIFI_MODE_STA and WIFI_MODE_AP are supposed to be bitfields!
 #endif
 
-const mp_obj_type_t wlan_if_type;
+STATIC const mp_obj_type_t wlan_if_type;
 STATIC const wlan_if_obj_t wlan_sta_obj = {{&wlan_if_type}, WIFI_IF_STA};
 STATIC const wlan_if_obj_t wlan_ap_obj = {{&wlan_if_type}, WIFI_IF_AP};
 
@@ -428,10 +428,6 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         esp_exceptions(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
                         break;
                     }
-                    case MP_QSTR_max_tx_power: {
-                        esp_exceptions(esp_wifi_set_max_tx_power(mp_obj_get_int(kwargs->table[i].value)));
-                        break;
-                    }
                     case MP_QSTR_ssid: {
                         req_if = WIFI_IF_AP;
                         size_t len;
@@ -533,12 +529,6 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                     goto unknown;
             }
         }
-        case MP_QSTR_power: {
-            wifi_ps_type_t ps_type;
-            esp_exceptions(esp_wifi_get_ps(&ps_type));
-            val = MP_OBJ_NEW_SMALL_INT(ps_type);
-            break;
-        }
         case MP_QSTR_protocol: {
             uint8_t protocol_bitmap;
             esp_exceptions(esp_wifi_get_protocol(self->if_id, &protocol_bitmap));
@@ -549,12 +539,6 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
             wifi_ps_type_t ps_type;
             esp_exceptions(esp_wifi_get_ps(&ps_type));
             val = MP_OBJ_NEW_SMALL_INT(ps_type);
-            break;
-        }
-        case MP_QSTR_max_tx_power: {
-            int8_t power;
-            esp_exceptions(esp_wifi_get_max_tx_power(&power));
-            val = MP_OBJ_NEW_SMALL_INT(power);
             break;
         }
         case MP_QSTR_ssid:
@@ -635,7 +619,7 @@ STATIC const mp_rom_map_elem_t wlan_if_locals_dict_table[] = {
 };
 STATIC MP_DEFINE_CONST_DICT(wlan_if_locals_dict, wlan_if_locals_dict_table);
 
-const mp_obj_type_t wlan_if_type = {
+STATIC const mp_obj_type_t wlan_if_type = {
     { &mp_type_type },
     .name = MP_QSTR_WLAN,
     .locals_dict = (mp_obj_t)&wlan_if_locals_dict,
