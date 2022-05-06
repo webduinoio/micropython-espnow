@@ -301,7 +301,7 @@ receiving ESP-NOW messages. You can avoid this by calling
         - ``msg`` is the message/data sent from the peer.
 
       **Note**: Memory will be allocated once for the tuple and ``msg``
-      bytearray on invocation of `espnow.ESPNow()<ESPNow()>` and reused for
+      byte string on invocation of `espnow.ESPNow()<ESPNow()>` and reused for
       subsequent calls to `irecv()<ESPNow.irecv()>`. You must make a copy of
       ``msg`` if you wish to retain the value across calls to ``irecv()``.
       This greatly reduces memory fragmentation compared to using
