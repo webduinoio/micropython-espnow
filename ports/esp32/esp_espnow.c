@@ -691,21 +691,22 @@ STATIC bool _update_peer_info(
 }
 
 // Update the cached peer count in self->peer_count;
-// The peer_count is used for the send()/write() logic and is updated
-// from add_peer(), mod_peer() and del_peer().
+// The peer_count ignores broadcast and multicast addresses and is used for the
+// send() logic and is updated from add_peer(), mod_peer() and del_peer().
 STATIC void _update_peer_count() {
     esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-    esp_now_peer_num_t peer_num = {0};
-    check_esp_err(esp_now_get_peer_num(&peer_num));
-    self->peer_count = peer_num.total_num;
 
-    // Check if the the broadcast MAC address is registered
-    uint8_t broadcast[ESP_NOW_ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
     esp_now_peer_info_t peer = {0};
-    if (esp_now_get_peer(broadcast, &peer) == ESP_OK) {
-        // Don't count the broadcast address
-        self->peer_count--;
+    bool from_head = true;
+    int count = 0;
+    // esp_now_fetch_peer() skips over any broadcast or multicast addresses
+    while (esp_now_fetch_peer(from_head, &peer) == ESP_OK) {
+        from_head = false;
+        if (++count >= ESP_NOW_MAX_TOTAL_PEER_NUM) {
+            break;          // Should not happen
+        }
     }
+    self->peer_count = count;
 }
 
 // ESPNow.add_peer(peer_mac, [lmk, [channel, [ifidx, [encrypt]]]]) or
@@ -802,16 +803,13 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_del_peer_obj, espnow_del_peer);
 STATIC mp_obj_t espnow_get_peers(mp_obj_t _) {
     esp_espnow_obj_t *self = _get_singleton(INITIALISED);
 
+    // Build and initialise the peer info tuple.
     mp_obj_tuple_t *peerinfo_tuple = mp_obj_new_tuple(self->peer_count, NULL);
     esp_now_peer_info_t peer = {0};
-    bool from_head = true;
-    int count = 0;
-    while (esp_now_fetch_peer(from_head, &peer) == ESP_OK) {
-        from_head = false;
-        peerinfo_tuple->items[count] = peer_info_to_tuple(&peer);
-        if (++count >= self->peer_count) {
-            break;          // Should not happen
-        }
+    for (int i = 0; i < peerinfo_tuple->len; i++) {
+        int status = esp_now_fetch_peer((i == 0), &peer);
+        peerinfo_tuple->items[i] =
+            (status == ESP_OK ? peer_info_to_tuple(&peer) : mp_const_none);
     }
 
     return peerinfo_tuple;
