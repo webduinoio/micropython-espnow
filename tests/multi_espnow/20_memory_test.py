@@ -102,7 +102,7 @@ def instance1():
     echo_test(e, peer, b"!done", True)
     gc.collect()
     mem_end = gc.mem_alloc()
-    if (mem_end - mem_start < 1024):
+    if mem_end - mem_start < 1024:
         print("OK: Less than 1024 bytes consumed")
     else:
         print("Error: Memory consumed is", mem_end - mem_start)
