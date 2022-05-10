@@ -64,21 +64,24 @@
 #define ESP_NOW_MAX_ENCRYPT_PEER_NUM (6)
 typedef int esp_err_t;
 
-static const uint8_t ESPNOW_MAGIC = 0x99;
+// Relies on gcc Variadic Macros and Statement Expressions
+#define NEW_TUPLE(...) \
+    ({mp_obj_t _z[] = {__VA_ARGS__}; mp_obj_new_tuple(MP_ARRAY_SIZE(_z), _z); })
 
-// ESPNow packet format for the receive buffer.
-typedef struct {
-    uint8_t magic;              // = ESPNOW_MAGIC
-    uint8_t msg_len;            // Length of the message
-    uint8_t peer[6];            // Peer address
-    uint8_t msg[0];             // Message is up to 250 bytes
-} __attribute__((packed)) espnow_pkt_t;
+static const uint8_t ESPNOW_MAGIC = 0x99;
 
 // Use this for peeking at the header of the next packet in the buffer.
 typedef struct {
     uint8_t magic;              // = ESPNOW_MAGIC
     uint8_t msg_len;            // Length of the message
 } __attribute__((packed)) espnow_hdr_t;
+
+// ESPNow packet format for the receive buffer.
+typedef struct {
+    espnow_hdr_t hdr;           // The header
+    uint8_t peer[6];            // Peer address
+    uint8_t msg[0];             // Message is up to 250 bytes
+} __attribute__((packed)) espnow_pkt_t;
 
 // The maximum length of an espnow packet (bytes)
 static const size_t MAX_PACKET_LEN = (
@@ -91,9 +94,6 @@ static const size_t DEFAULT_RECV_BUFFER_SIZE = (
 
 // Default timeout (millisec) to wait for incoming ESPNow messages (5 minutes).
 static const size_t DEFAULT_RECV_TIMEOUT_MS = (5 * 60 * 1000);
-
-// Time to wait (millisec) for responses from sent packets: (2 seconds).
-static const size_t DEFAULT_SEND_TIMEOUT_MS = (2 * 1000);
 
 // Number of milliseconds to wait (mp_hal_wait_ms()) in each loop
 // while waiting for send or receive packet.
@@ -155,20 +155,24 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
 
     // Allocate and initialise the "callee-owned" tuple for irecv().
     espnow_pkt_t *pkt = (espnow_pkt_t *)m_malloc0(MAX_PACKET_LEN);
-    pkt->magic = ESPNOW_MAGIC;
-    pkt->msg_len = 0;
-    // Build a tuple of bytearrays. The first bytearray points to
+    // pkt->magic = ESPNOW_MAGIC;
+    // pkt->msg_len = 0;
+    // Build a tuple of byte strings. The first byte string points to
     // peer mac address and the second to message in the packet buffer.
+    mp_obj_str_t *peer = MP_OBJ_TO_PTR(
+        mp_obj_new_bytes(NULL, ESP_NOW_ETH_ALEN));
+    peer->data = pkt->peer;
+    mp_obj_str_t *msg = MP_OBJ_TO_PTR(
+        mp_obj_new_bytes(NULL, ESP_NOW_MAX_DATA_LEN));
+    msg->data = pkt->msg;
     self->irecv_packet = pkt;
-    self->irecv_tuple = mp_obj_new_tuple(2,
-        (mp_obj_t[]) {
-        mp_obj_new_bytearray_by_ref(ESP_NOW_ETH_ALEN, pkt->peer),
-        mp_obj_new_bytearray_by_ref(ESP_NOW_MAX_DATA_LEN, pkt->msg)
-    });
-    self->none_tuple = mp_obj_new_tuple(
-        2, (mp_obj_t[]) {mp_const_none, mp_const_none});
+    self->irecv_tuple = NEW_TUPLE(
+        MP_OBJ_FROM_PTR(peer),
+        MP_OBJ_FROM_PTR(msg));
+    self->none_tuple = NEW_TUPLE(
+        mp_const_none,
+        mp_const_none);
     self->recv_timeout_ms = DEFAULT_RECV_TIMEOUT_MS;
-    // self->recv_cb = mp_const_none;
 
     // Set the global singleton pointer for the espnow protocol.
     MP_STATE_PORT(espnow_singleton) = self;
@@ -216,7 +220,7 @@ mp_obj_t espnow_deinit(mp_obj_t _) {
     esp_espnow_obj_t *self = _get_singleton(0);
     if (self != NULL && self->recv_buffer != NULL) {
         esp_now_unregister_recv_cb();
-        esp_now_unregister_send_cb();
+        //esp_now_unregister_send_cb();
         esp_now_deinit();
         buffer_release(self->recv_buffer);
         self->recv_buffer = NULL;
@@ -248,15 +252,15 @@ STATIC void send_cb(uint8_t *mac_addr, uint8_t status) {
 STATIC void recv_cb(
     uint8_t *mac_addr, uint8_t *msg, uint8_t msg_len) {
 
-    esp_espnow_obj_t *self = MP_STATE_PORT(espnow_singleton);
+    esp_espnow_obj_t *self = _get_singleton(0);
     buffer_t buf = self->recv_buffer;
     if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
         return;
     }
-    const espnow_hdr_t header = {
-        .magic = ESPNOW_MAGIC,
-        .msg_len = msg_len
-    };
+    espnow_hdr_t header;
+    header.magic = ESPNOW_MAGIC;
+    header.msg_len = msg_len;
+
     buffer_put(buf, &header, sizeof(header));
     buffer_put(buf, mac_addr, ESP_NOW_ETH_ALEN);
     buffer_put(buf, msg, msg_len);
@@ -267,44 +271,6 @@ STATIC void recv_cb(
 
 // ### Handling espnow packets in the recv buffer
 //
-
-// Check the packet header provided and return the packet length.
-// Raises ValueError if the header is bad or the packet is larger than max_size.
-// Bypass the size check if max_size == 0.
-// Returns the packet length in bytes (including header).
-static int _check_packet_length(espnow_hdr_t *header, size_t max_size) {
-    if (header->magic != ESPNOW_MAGIC ||
-        header->msg_len > ESP_NOW_MAX_DATA_LEN) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Bad packet"));
-    }
-    int pkt_len = header->msg_len + sizeof(espnow_pkt_t);
-    if (max_size > 0 && max_size < pkt_len) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Buffer too small for packet"));
-    }
-    return pkt_len;
-}
-
-// ### Send and Receive ESP_Now data
-//
-
-// Wait for a packet to be received and return the packet length.
-// Timeout is set in args or by default.
-// Raises ValueError if the header is bad.
-// Returns the length of the packet or 0 if there is no packet available.
-// Used by espnow_recv() and espnow_irecv().
-static int _get_packet(
-    buffer_t buffer, void *buf_out, size_t max_size, int timeout_ms) {
-
-    espnow_pkt_t *pkt = buf_out;
-    if (!buffer_recv(buffer, pkt, sizeof(*pkt), timeout_ms)) {
-        return 0;
-    }
-    int pkt_len = _check_packet_length((espnow_hdr_t *)pkt, 0);
-    if (!buffer_get(buffer, pkt->msg, pkt->msg_len)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("Buffer error"));
-    }
-    return pkt_len;
-}
 
 // ESPNow.irecv([timeout]):
 // Like ESPNow.recv() but returns a "callee-owned" tuple of byte strings.
@@ -320,14 +286,26 @@ STATIC mp_obj_t espnow_irecv(size_t n_args, const mp_obj_t *args) {
     size_t timeout_ms = (
         (n_args > 1) ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
 
+    // Get the peer and msg byte strings from the callee-owned tuple
+    mp_obj_str_t *peer = MP_OBJ_TO_PTR(self->irecv_tuple->items[0]);
+    mp_obj_str_t *msg = MP_OBJ_TO_PTR(self->irecv_tuple->items[1]);
+    msg->len = msg->hash = peer->hash = 0;
+
     // Read the packet header from the incoming buffer
-    mp_obj_array_t *msg = self->irecv_tuple->items[1];
     espnow_pkt_t *pkt = self->irecv_packet;
-    if (_get_packet(self->recv_buffer, pkt, sizeof(*pkt), timeout_ms) == 0) {
-        msg->len = 0;               // Set callee-owned msg bytearray to empty.
-        return self->none_tuple;    // Return tuple(None, None)
+    if (!buffer_recv(self->recv_buffer, pkt, sizeof(*pkt), timeout_ms)) {
+        return self->none_tuple; // Timeout waiting for packet
     }
-    msg->len = pkt->msg_len;
+    // Check the message packet header format
+    if (pkt->hdr.magic != ESPNOW_MAGIC ||
+        pkt->hdr.msg_len > ESP_NOW_MAX_DATA_LEN) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Bad packet"));
+    }
+    // Now read the message into the byte string.
+    if (!buffer_get(self->recv_buffer, (byte *)msg->data, pkt->hdr.msg_len)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("Buffer error"));
+    }
+    msg->len = pkt->hdr.msg_len;
     return MP_OBJ_FROM_PTR(self->irecv_tuple);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_irecv_obj, 1, 2, espnow_irecv);
@@ -337,11 +315,9 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_irecv_obj, 1, 2, espnow_irecv)
 // ie. self->tx_responses == self->tx_packets.
 // Return the number of responses where status != ESP_NOW_SEND_SUCCESS.
 static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
-    int64_t start = mp_hal_ticks_ms();
     // Note: the send timeout is just a fallback - in normal operation
     // we should never reach that timeout.
-    while (self->tx_responses < self->tx_packets &&
-           (mp_hal_ticks_ms() - start) <= DEFAULT_SEND_TIMEOUT_MS) {
+    for (int i = 0; i < 90 && self->tx_responses < self->tx_packets; i++) {
         // Won't yield unless delay > portTICK_PERIOD_MS (10ms)
         mp_hal_delay_ms(BUSY_WAIT_MS);
     }
