@@ -5,21 +5,8 @@ import uasyncio
 from esp import espnow
 
 
-def _singleton(cls):
-    instance = None
-
-    def getinstance(*args, **kwargs):
-        nonlocal instance
-        if instance is None:
-            instance = cls(*args, **kwargs)
-        return instance
-
-    return getinstance
-
-
 # Modelled on the uasyncio.Stream class (extmod/stream/stream.py)
 # NOTE: Relies on internal implementation of uasyncio.core (_io_queue)
-@_singleton
 class AIOESPNow(espnow.ESPNow):
     def __init__(self, e=None):
         super().__init__()
