@@ -426,11 +426,11 @@ STATIC void recv_cb(
     const uint8_t *mac_addr, const uint8_t *msg, int msg_len) {
 
     esp_espnow_obj_t *self = _get_singleton(0);
-    if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(self->recv_buffer)) {
+    buffer_t buf = self->recv_buffer;
+    if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
         self->dropped_rx_pkts++;
         return;
     }
-    buffer_t buf = self->recv_buffer;
     espnow_hdr_t header;
     header.magic = ESPNOW_MAGIC;
     header.msg_len = msg_len;
@@ -881,25 +881,16 @@ STATIC MP_DEFINE_CONST_DICT(espnow_globals_dict, espnow_globals_dict_table);
 // Support ioctl(MP_STREAM_POLL, ) for asyncio
 STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
     uintptr_t arg, int *errcode) {
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-    mp_uint_t ret;
-    if (request == MP_STREAM_POLL) {
-        mp_uint_t flags = arg;
-        ret = 0;
-        // Consider read ready when the incoming buffer is not empty
-        if ((flags & MP_STREAM_POLL_RD) && !buffer_empty(self->recv_buffer)) {
-            ret |= MP_STREAM_POLL_RD;
-        }
-        // Consider write ready when all sent packets have been acknowledged.
-        if ((flags & MP_STREAM_POLL_WR) &&
-            self->tx_responses >= self->tx_packets) {
-            ret |= MP_STREAM_POLL_WR;
-        }
-    } else {
+    if (request != MP_STREAM_POLL) {
         *errcode = MP_EINVAL;
-        ret = MP_STREAM_ERROR;
+        return MP_STREAM_ERROR;
     }
-    return ret;
+    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
+    return arg & (
+        // If no data in the buffer, unset the Read ready flag
+        (buffer_empty(self->recv_buffer) ? 0: MP_STREAM_POLL_RD) |
+        // If we are still waiting for responses, unset the Write ready flag
+        (self->tx_responses < self->tx_packets ? 0: MP_STREAM_POLL_WR));
 }
 
 STATIC const mp_stream_p_t espnow_stream_p = {
@@ -915,22 +906,22 @@ STATIC const mp_stream_p_t espnow_stream_p = {
 //   time_sec is the time in milliseconds since device last booted.
 STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     esp_espnow_obj_t *self = _get_singleton(0);
-    if (dest[0] == MP_OBJ_NULL) {   // Load
-        if (attr == MP_QSTR_peers) {
-            dest[0] = self->peers_table;
-        } else {
-            dest[1] = MP_OBJ_SENTINEL;
-        }
+    if (dest[0] != MP_OBJ_NULL) {   // Only allow "Load" operation
+        return;
     }
+    if (attr == MP_QSTR_peers) {
+        dest[0] = self->peers_table;
+        return;
+    }
+    dest[1] = MP_OBJ_SENTINEL;  // Attribute not found
 }
 
 // Iterating over ESPNow returns tuples of (peer_addr, message)...
 STATIC mp_obj_t espnow_iternext(mp_obj_t self_in) {
     esp_espnow_obj_t *self = _get_singleton(0);
-    if (self->recv_buffer == NULL) {
-        return MP_OBJ_STOP_ITERATION;
-    }
-    return espnow_irecv(1, &self_in);
+    return (self->recv_buffer != NULL)
+                ? espnow_irecv(1, &self_in)
+                : MP_OBJ_STOP_ITERATION;
 }
 
 const mp_obj_type_t esp_espnow_type = {
