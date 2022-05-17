@@ -685,7 +685,7 @@ STATIC bool _update_peer_info(
         mp_obj_t obj = args[ARG_lmk].u_obj;
         peer->encrypt = mp_obj_is_true(obj);
         if (peer->encrypt) {
-            // Key can be <= 16 bytes - padded with '\0'.
+            // Key must be 16 bytes in length.
             memcpy(peer->lmk,
                 _get_bytes_len(obj, ESP_NOW_KEY_LEN),
                 ESP_NOW_KEY_LEN);
