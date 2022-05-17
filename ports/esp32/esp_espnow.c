@@ -885,12 +885,13 @@ STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
         *errcode = MP_EINVAL;
         return MP_STREAM_ERROR;
     }
-    esp_espnow_obj_t *self = _get_singleton(INITIALISED);
-    return arg & (
-        // If no data in the buffer, unset the Read ready flag
-        (buffer_empty(self->recv_buffer) ? 0: MP_STREAM_POLL_RD) |
-        // If we are still waiting for responses, unset the Write ready flag
-        (self->tx_responses < self->tx_packets ? 0: MP_STREAM_POLL_WR));
+    esp_espnow_obj_t *self = _get_singleton(0);
+    return (self->recv_buffer == NULL) ? 0 : // If not initialised
+           arg & (
+               // If no data in the buffer, unset the Read ready flag
+               (buffer_empty(self->recv_buffer) ? 0: MP_STREAM_POLL_RD) |
+               // If still waiting for responses, unset the Write ready flag
+               (self->tx_responses < self->tx_packets ? 0: MP_STREAM_POLL_WR));
 }
 
 STATIC const mp_stream_p_t espnow_stream_p = {
