@@ -153,7 +153,7 @@ extern const struct _mp_print_t mp_debug_print;
 #define MP_STATE_PORT MP_STATE_VM
 
 #if MICROPY_ESPNOW
-#define MICROPY_PORT_ROOT_POINTER_ESPNOW struct _esp_espnow_obj_t *espnow_singleton;
+#define MICROPY_PORT_ROOT_POINTER_ESPNOW void *espnow_buffer;
 #else
 #define MICROPY_PORT_ROOT_POINTER_ESPNOW
 #endif

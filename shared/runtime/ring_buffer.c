@@ -69,12 +69,14 @@ RB_STATIC buffer_t buffer_init(size_t size) {
     return buffer;
 }
 
+#ifndef RING_BUFFER_INCLUDE_AS_STATIC
 // Release and free the memory buffer
 RB_STATIC void buffer_release(buffer_t buffer) {
     assert(buffer);
     buffer->size = buffer->head = buffer->tail = 0;
     m_free(buffer);
 }
+#endif
 
 // Copy some data to the buffer - reject if buffer is full
 RB_STATIC bool buffer_put(buffer_t buffer, const void *data, size_t len) {
