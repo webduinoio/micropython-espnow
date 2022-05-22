@@ -79,7 +79,6 @@ STATIC void mp_reset(void) {
 
     #if MICROPY_ESPNOW
     espnow_deinit(mp_const_none);
-    MP_STATE_PORT(espnow_singleton) = NULL;
     #endif
 
     #if MICROPY_MODULE_FROZEN
