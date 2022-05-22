@@ -8,7 +8,7 @@ try:
     import random
     import uselect
     import usys
-    from esp import espnow
+    import espnowio as espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -53,7 +53,7 @@ def client_send(e, peer, msg, sync):
 def init(sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
     e = espnow.ESPNow()
-    e.init()
+    e.active(True)
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
@@ -77,7 +77,7 @@ def instance0():
     print("Server Start")
     echo_server(e)
     print("Server Done")
-    e.deinit()
+    e.active(False)
 
 
 # Client
@@ -101,12 +101,12 @@ def instance1():
     print("OK" if msg2 == msg else "ERROR: Received != Sent")
 
     print("RSSI test...")
-    if len(e.peers) != 1:
-        print("ERROR: len(ESPNow.peers()) != 1. ESPNow.peers()=", peers)
-    elif list(e.peers.keys())[0] != peer:
-        print("ERROR: ESPNow.peers().keys[0] != peer. ESPNow.peers()=", peers)
+    if len(e.peers_table) != 1:
+        print("ERROR: len(ESPNow.peers_table()) != 1. ESPNow.peers_table()=", peers)
+    elif list(e.peers_table.keys())[0] != peer:
+        print("ERROR: ESPNow.peers_table().keys[0] != peer. ESPNow.peers_table()=", peers)
     else:
-        rssi, time_ms = e.peers[peer]
+        rssi, time_ms = e.peers_table[peer]
         if not -127 < rssi < 0:
             print("ERROR: Invalid rssi value:", rssi)
         elif abs(time.time() - time_ms / 1000) > 5:
@@ -121,4 +121,4 @@ def instance1():
     p2, msg2 = e.irecv()
     print("OK" if msg2 == msg else "ERROR: Received != Sent")
 
-    e.deinit()
+    e.active(False)
