@@ -6,7 +6,7 @@ try:
     import network
     import random
     import usys
-    from esp import espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -32,7 +32,7 @@ def client_send(e, peer, msg, sync):
 def init(sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
     e = espnow.ESPNow()
-    e.init()
+    e.active(True)
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
@@ -65,16 +65,13 @@ try:
                 return
 
     def instance0():
-        if usys.platform != "esp32":
-            print("SKIP")
-            raise SystemExit
         e = init(True, False)
         multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
         multitest.next()
         print("Server Start")
         asyncio.run(echo_server(AIOESPNow(e)))
         print("Server Done")
-        e.deinit()
+        e.active(False)
 
 except:
     pass
@@ -99,4 +96,4 @@ def instance1():
     p2, msg2 = e.irecv(timeout)
     print("OK" if msg2 == msg else "ERROR: Received != Sent")
 
-    e.deinit()
+    e.active(False)

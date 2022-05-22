@@ -6,7 +6,7 @@ try:
     import network
     import random
     import usys
-    from esp import espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -52,7 +52,7 @@ def client_send(e, peer, msg, sync):
 def init(sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
     e = espnow.ESPNow()
-    e.init()
+    e.active(True)
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
@@ -77,7 +77,7 @@ def instance0():
     print("Server Start")
     echo_server(e)
     print("Server Done")
-    e.deinit()
+    e.active(False)
 
 
 def instance1():
@@ -114,15 +114,11 @@ try:
         mac, reply = await e.airecv()
         print("OK" if reply == msg else "ERROR: Received != Sent")
 
-        e.deinit()
+        e.active(False)
 
     # Client
     def instance1():
-        # Instance 1 (the client) must be an ESP32
-        if usys.platform != "esp32":
-            print("SKIP")
-            raise SystemExit
-
+        # Instance 1 (the client)
         asyncio.run(client())
 
 except:

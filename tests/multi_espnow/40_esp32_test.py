@@ -7,7 +7,7 @@ try:
     import random
     import uselect
     import usys
-    from esp import espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -52,21 +52,12 @@ def client_send(e, peer, msg, sync):
 def init(sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
     e = espnow.ESPNow()
-    e.init()
+    e.active(True)
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
     wlans[1].active(ap_active)
     wlans[0].disconnect()  # Force esp8266 STA interface to disconnect from AP
     return e
-
-
-def poll(e):
-    poll = uselect.poll()
-    poll.register(e, uselect.POLLIN)
-    p = poll.ipoll(timeout)
-    if not p:
-        print("ERROR: poll() timeout waiting for response.")
-    return p
 
 
 # Server
@@ -77,16 +68,12 @@ def instance0():
     print("Server Start")
     echo_server(e)
     print("Server Done")
-    e.deinit()
+    e.active(False)
 
 
 # Client
 def instance1():
-    # Instance 1 (the client) must be an ESP32
-    if usys.platform != "esp32":
-        print("SKIP")
-        raise SystemExit
-
+    # Instance 1 (the client)
     e = init(True, False)
     e.config(timeout=timeout)
     multitest.next()
@@ -118,4 +105,4 @@ def instance1():
     p2, msg2 = e.irecv()
     print("OK" if msg2 == msg else "ERROR: Received != Sent")
 
-    e.deinit()
+    e.active(False)

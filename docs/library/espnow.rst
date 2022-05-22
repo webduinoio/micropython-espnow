@@ -15,17 +15,14 @@ Table of Contents:
     - `Introduction`_
     - `Configuration`_
     - `Sending and Receiving Data`_
-    - `Receiving Data by Iteration - (ESP32 Only)`_
     - `Peer Management`_
     - `Exceptions`_
-    - `Constants - (ESP32 Only)`_
+    - `Constants`_
     - `Wifi Signal Strength (RSSI) - (ESP32 Only)`_
-    - `Supporting asyncio - (ESP32 Only)`_
-    - `Stream IO interface - (deprecated)`_
+    - `Supporting asyncio`_
     - `Broadcast and Multicast`_
     - `ESPNow and Wifi Operation`_
     - `ESPNow and Sleep Modes`_
-    - `Notes on using on_recv callbacks`_
 
 Introduction
 ------------
@@ -68,7 +65,7 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
 **Sender:** ::
 
     import network
-    from esp import espnow
+    import espnow
 
     # A WLAN interface must be active to send()/recv()
     w0 = network.WLAN(network.STA_IF)  # Or network.AP_IF
@@ -76,7 +73,7 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     w0.disconnect()   # For ESP8266
 
     e = espnow.ESPNow()
-    e.init()
+    e.active(True)
     peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'   # MAC address of peer's wifi interface
     e.add_peer(peer)
 
@@ -88,21 +85,21 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
 **Receiver:** ::
 
     import network
-    from esp import espnow
+    import espnow
 
     # A WLAN interface must be active to send()/recv()
     w0 = network.WLAN(network.STA_IF)
     w0.active(True)
-    w0.disconnect()   # For ESP8266
+    w0.disconnect()   # Because ESP8266 auto-connects to last Access Point
 
     e = espnow.ESPNow()
-    e.init()
+    e.active(True)
     peer = b'\xaa\xaa\xaa\xaa\xaa\xaa'   # MAC address of peer's wifi interface
     e.add_peer(peer)
 
     while True:
-        host, msg = e.irecv()     # Available on ESP32 and ESP8266
-        if msg:             # msg == None if timeout in irecv()
+        host, msg = e.recv()
+        if msg:             # msg == None if timeout in recv()
             print(host, msg)
             if msg == b'end':
                 break
@@ -125,49 +122,43 @@ Constructor
 Configuration
 -------------
 
-.. method:: ESPNow.init()
-            ESPNow.init([rx_buf[, timeout[, on_recv]]])    (ESP8266 only)
+.. method:: ESPNow.active([flag])
 
-    Prepare the software and hardware for use of the ESPNow communication
-    protocol, including:
+    Initialise or de-initialise the ESPNow communication protocol depending on
+    the value of the ``flag`` optional argument.
 
-    - initialise the ESPNow data structures,
-    - allocate the recv data buffer,
-    - invoke esp_now_init() and
-    - register the send and recv callbacks.
+    .. data:: Arguments:
 
-    **ESP8266**: `config()` is unavailable on the ESP8266 due to code size
-    restrictions, so values for the ``rxbuf``, ``timeout`` and ``on_recv``
-    options may be provided as positional arguments to `init()` ( eg.
-    ``init(1024, 5000, callback_fn)``). If any argument is set to ``None`` the
-    option will be left at it's default value (see `config()`).
+      - ``flag``: Any python value which can be converted to a boolean type.
 
-    .. data:: Returns:
+        - ``True``: Prepare the software and hardware for use of the ESPNow
+          communication protocol, including:
 
-        ``None``
+          - initialise the ESPNow data structures,
+          - allocate the recv data buffer,
+          - invoke esp_now_init() and
+          - register the send and recv callbacks.
 
-.. method:: ESPNow.deinit()
+        - ``False``: De-initialise the Espressif ESPNow software stack
+          (esp_now_deinit()), disable callbacks, deallocate the recv
+          data buffer and deregister all peers.
 
-    De-initialise the Espressif ESPNow software stack (esp_now_deinit()),
-    disable callbacks and deallocate the recv data buffer.
-
-    **Note**: `deinit()` will also deregister all peers which must be
-    re-registered after `init()`.
+    If ``flag`` is not provided, return the current status of the ESPNow
+    interface.
 
     .. data:: Returns:
 
-        ``None``
+        ``True`` if interface is currently *active*, else ``False``.
 
-.. method:: ESPNow.config('param')
-            ESPNow.config(param=value, ...)
+.. method:: ESPNow.config(param=value, ...)
+            ESPNow.config('param')   (ESP32 only)
 
-    **ESP32 only:** Use `init([rx_buf],
-    [timeout])<ESPNow.init()>` on the ESP8266.
+    Set or get configuration values of the ESPNow interface. To set values, use
+    the keyword syntax, and one or more parameters can be set at a time. To get
+    a value the parameter name should be quoted as a string, and just one
+    parameter is queried at a time.
 
-    Get or set configuration values of the ESPNow interface. To get a value
-    the parameter name should be quoted as a string, and just one parameter is
-    queried at a time.  To set values use the keyword syntax, and one or more
-    parameters can be set at a time.
+    **Note:** *Getting* parameters is not supported on the ESP8266.
 
     .. data:: Options:
 
@@ -178,32 +169,21 @@ Configuration
         plus buffer overhead. Increase this if you expect to receive a lot of
         large packets or expect bursty incoming traffic.
 
-        **Note:** The recv buffer is allocated by `ESPNow.init()`. Changing
-        this value will have no effect until the next call of `ESPNow.init()`.
+        **Note:** The recv buffer is allocated by `ESPNow.active()`. Changing
+        this value will have no effect until the next call of
+        `ESPNow.active(True)<ESPNow.active()>`.
 
-        ``timeout``: *(default=300,000)* Default read timeout (in
-        milliseconds). The timeout can also be provided as arg to `recv()` and
-        `irecv()`.
+        ``timeout``: *(default=300,000)* Default read timeout (in milliseconds).
+        The timeout can also be provided as arg to `recvinto()`.
 
         ``rate``: Set the transmission speed for espnow packets. Must be set to
         a number from the allowed numeric values in `enum wifi_phy_rate_t
         <https://docs.espressif.com/projects/esp-idf/en/v4.4.1/esp32/
         api-reference/network/esp_wifi.html#_CPPv415wifi_phy_rate_t>`_.
 
-        ``on_recv``: *(default=None)* Get/set a callback function to be called
-        *as soon as possible* after a message has been received from another
-        ESPNow device. The function will be called with the espnow object as an
-        argument, eg::
-
-          def recv_cb(e):
-              print(e.irecv(0))
-          e.config(on_recv=recv_cb)
-
-        See `Notes on using on_recv callbacks`_ below for more information.
-
     .. data:: Returns:
 
-        ``None``
+        ``None`` or the value of the parameter being queried.
 
     .. data:: Raises:
 
@@ -276,39 +256,27 @@ receiving ESP-NOW messages. You can avoid this by calling
     regardless of whether it has initialised it's ESP-Now system or is
     actively listening for ESP-Now traffic (see the Espressif ESP-Now docs).
 
-.. method:: ESPNow.irecv([timeout])
+.. method:: ESPNow.recv([timeout])
 
-    Wait for an incoming message and return the MAC address of the sender and
+    Wait for an incoming message and return the ``mac`` adress of the peer and
     the message. **Note**: It is **not** necessary to register a peer (using
     `add_peer()<ESPNow.add_peer()>`) to receive a message from that peer.
 
     .. data:: Arguments:
 
-        ``timeout`` optionally sets a timeout (in milliseconds) for the read.
-        The default timeout (5 minutes) can be set using `ESPNow.config()` on
-        the ESP32 or `ESPNow.init()` on the ESP8266. If ``timeout`` is less than
-        zero, then wait forever.
+        ``timeout``: *(Optional)* If provided and not `None`, sets a timeout (in
+        milliseconds) for the read. The default timeout (5 minutes) is set using
+        `ESPNow.config()`. If ``timeout`` is less than zero, then wait forever.
 
     .. data:: Returns:
 
-      - ``(None, None)`` if ``timeout`` is reached before a message is
-        received, or
+      - ``(None, None)`` if ``timeout`` before a message is received, or
 
-      - ``(mac, msg)``: a `callee-owned tuple`, where:
+      - ``[mac, msg]``: where:
 
-        - ``mac`` is the MAC address of the sending device (peer) and
-
-        - ``msg`` is the message/data sent from the peer.
-
-      **Note**: Memory will be allocated once for the tuple and ``msg``
-      byte string on invocation of `espnow.ESPNow()<ESPNow()>` and reused for
-      subsequent calls to `irecv()<ESPNow.irecv()>`. You must make a copy of
-      ``msg`` if you wish to retain the value across calls to ``irecv()``.
-      This greatly reduces memory fragmentation compared to using
-      `recv()<ESPNow.recv()>`.
-
-      The ``mac`` values are always references to the ``peer`` addresses in
-      the **peer device table** (see `ESPNow.peers`).
+        - ``mac`` is a bytestring containing the address of the device which
+          sent the message, and
+        - ``msg`` is a bytestring containing the message.
 
     .. data:: Raises:
 
@@ -317,35 +285,91 @@ receiving ESP-NOW messages. You can avoid this by calling
         `active()<network.WLAN.active>`.
       - ``ValueError()`` on invalid ``timeout`` values.
 
-.. method:: ESPNow.recv([timeout]) (ESP32 only)
+    `ESPNow.recv()` will allocate new storage for the returned list and the
+    ``peer`` and ``msg`` bytestrings. This can lead to memory fragmentation if
+    the data rate is high. See `ESPNow.irecv()` for a memory-friendly
+    alternative.
 
-    **ESP32 only:** Use `irecv()` on the esp8266.
 
-    As for `irecv()`, except that `recv()` will return a newly allocated tuple
-    of byte strings.
+.. method:: ESPNow.irecv([timeout])
 
-    .. data:: Returns:
+    Works like `ESPNow.recv()` but will re-use internal bytearrays to store the
+    return values: ``[mac, peer]``, so that no new memory is allocated on each
+    call.
 
-      - ``(mac, message)``: a newly allocated tuple of `bytes` where:
+    .. data:: Arguments:
 
-        - ``mac`` is the mac address of the sending device (peer) and
-
-        - ``msg`` is the message/data sent from the peer.
-
-      **Note**: repeatedly calling `recv()<ESPNow.recv()>` will exercise the
-      micropython memory allocation as new storage is allocated for each new
-      message and tuple. Use `irecv()<ESPNow.irecv()>` for a more
-      memory-efficient option.
-
-      The ``mac`` values are always references to the ``peer`` addresses in
-      the **peer device table** (see `ESPNow.peers()`).
-
-.. method:: ESPNow.poll() (ESP32 only)
+        ``timeout``: *(Optional)* Timeout in milliseconds (see `ESPNow.recv()`).
 
     .. data:: Returns:
 
-       ``True`` if data is available to be read with ``recv()/irecv()``, else
-       ``False``.
+      - As for `ESPNow.recv()`, except that ``msg`` is a bytearray, instead of
+        a bytestring. On the ESP8266, ``mac`` will also be a bytearray.
+
+    .. data:: Raises:
+
+      - See `ESPNow.recv()`.
+
+    **Note:** You may also read messages by iterating over the ESPNow object,
+    which will use `irecv()` method for alloc-free reads, eg: ::
+
+      import espnow
+      e = espnow.ESPNow(); e.active(True)
+      for mac, msg in e:
+          print(mac, msg)
+          if mac is None:   # mac, msg will equal (None, None) on timeout
+              break
+
+.. method:: ESPNow.recvinto(data[, timeout])
+
+    Wait for an incoming message and return the length of the message in bytes.
+    This is the low-level method used by both `recv()<ESPNow.recv()>` and
+    `irecv()` to read messages.
+
+    .. data:: Arguments:
+
+        ``data``: A list of at least two elements, ``[peer, msg]``. ``msg`` must
+        be a bytearray large enough to hold the message (250 bytes). On the
+        ESP8266, ``peer`` should be a bytearray of 6 bytes. The MAC address of
+        the sender and the message will be stored in these bytearrays (see Note
+        on ESP32 below).
+
+        ``timeout``: *(Optional)* Timeout in milliseconds (see `ESPNow.recv()`).
+
+    .. data:: Returns:
+
+      - Length of message in bytes or 0 if ``timeout`` is reached before a
+        message is received.
+
+    .. data:: Raises:
+
+      - See `ESPNow.recv()`.
+
+    **Note:** On the ESP32:
+
+    - It is unnecessary to provide a bytearray in the first element of the
+      ``data`` list because it will be replaced by a reference to a unique
+      ``peer`` address in the **peer device table** (see `ESPNow.peers_table`).
+    - If the list is at latest 4 elements long, the rssi and timestamp values
+      will be saved as the 3rd and 4th elements.
+
+.. method:: ESPNow.any()
+
+    Check if data is available to be read with `ESPNow.recv()`.
+
+    For more sophisticated querying of available characters use select.poll::
+
+      import uselect as select
+      import espnow
+
+      e = espnow.ESPNow()
+      poll = select.poll()
+      poll.register(e, select.POLLIN)
+      poll.poll(timeout)
+
+    .. data:: Returns:
+
+       ``True`` if data is available to be read, else ``False``.
 
 .. method:: ESPNow.stats() (ESP32 only)
 
@@ -357,30 +381,34 @@ receiving ESP-NOW messages. You can avoid this by calling
 
     Incoming packets are *dropped* when the recv buffers are full. To reduce
     packet loss, increase the ``rxbuf`` config parameters and ensure you are
-    calling `irecv()<ESPNow.irecv()>` as quickly as possible.
+    reading messages as quickly as possible.
 
     **Note**: Dropped packets will still be acknowledged to the sender as
     received.
 
-Receiving Data by Iteration - (ESP32 Only)
-------------------------------------------
+.. method:: ESPNow.irq(recv_cb) (ESP32 only)
 
-It is also possible to read messages by iterating over the ESPNow singleton
-object. This will yield ``(mac, message)`` tuples using the alloc-free
-`irecv()` method, eg::
+  Set a callback function to be called *as soon as possible* after a
+  message has been received from another ESPNow device. The function will be
+  called with the ESPNow object as an argument:
 
-    for mac, msg in e:
-        print(f"Recv: mac={mac}, message={msg}")
-        if msg == b"!halt":
-            e.deinit()
+  .. data:: Returns:
 
-The iteration will continue while ``e`` remains initialised. That is, if you
-call `deinit()<ESPNow.deinit()>` (or fail to call `init()<ESPNow.init()>`
-before entering the loop), a ``StopIteration`` exception will be raised and
-the for loop will exit.
+      ``None``
 
-**Note**: Iteration will yield ``(None, None)`` if the default timeout expires
-while waiting for a message.
+  The `ESPNow.irq()` callback method is an alternative method for processing
+  incoming espnow messages, especially if the data rate is moderate and the
+  device is *not too busy* but there are some caveats:
+
+  - The scheduler stack *can* easily overflow and callbacks will be missed if
+    packets are arriving at a sufficient rate or if other micropython components
+    (eg, bluetooth, machine.Pin.irq(), machine.timer, i2s, ...) are exercising
+    the scheduler stack. This method may be less reliable for dealing with
+    bursts of messages, or high throughput or on a device which is busy dealing
+    with other hardware operations.
+
+  - For more information on *scheduled* function callbacks see:
+    `micropython.schedule()<micropython.schedule>`.
 
 Peer Management
 ---------------
@@ -403,8 +431,8 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
     .. data:: Arguments:
 
-      ``pmk``: Must be a byte string of length `espnow.KEY_LEN` (16
-      bytes).
+      ``pmk``: Must be a byte string, bytearray or string of length
+      `espnow.KEY_LEN` (16 bytes).
 
     .. data:: Returns:
 
@@ -428,7 +456,8 @@ The Espressif ESP-Now software requires that other devices (peers) must be
           transfers with this peer (unless the *encrypt* parameter is set to
           *False*). Must be:
 
-          - a byte-string of length ``espnow.KEY_LEN`` (16 bytes), or
+          - a byte-string, bytearray ot string of length ``espnow.KEY_LEN`` (16
+            bytes), or
 
           - any non ``True`` python value (default= ``b''``), signifying an
             *empty* key which will disable encryption.
@@ -448,6 +477,14 @@ The Espressif ESP-Now software requires that other devices (peers) must be
           ``False``)
 
         **ESP8266**: Keyword args may not be used on the ESP8266.
+
+        **Note:** The maximum number of peers which may be registered is 20
+        (`espnow.MAX_TOTAL_PEER_NUM`), with a maximum of 6
+        (`espnow.MAX_ENCRYPT_PEER_NUM`) of those peers with encryption enabled
+        (see `ESP_NOW_MAX_ENCRYPT_PEER_NUM <https://docs.espressif.com/
+        projects/esp-idf/en/latest/esp32/api-reference/network/
+        esp_now.html#c.ESP_NOW_MAX_ENCRYPT_PEER_NUM>`_ in the Espressif API
+        docs).
 
     .. data:: Raises:
 
@@ -510,11 +547,12 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     address. Parameters may be provided as positional or keyword arguments
     (see `ESPNow.add_peer()`).
 
-Constants - (ESP32 Only)
-------------------------
+Constants
+---------
 
 .. data:: espnow.MAX_DATA_LEN(=250)
           espnow.KEY_LEN(=16)
+          espnow.ETH_ALEN(=6)
           espnow.MAX_TOTAL_PEER_NUM(=20)
           espnow.MAX_ENCRYPT_PEER_NUM(=6)
 
@@ -535,7 +573,7 @@ api-reference/network/esp_now.html#api-reference>`_. For example::
         if len(err.args) < 2:
             raise err
         if err.args[1] == 'ESP_ERR_ESPNOW_NOT_INIT':
-            e.init()
+            e.active(True)
         elif err.args[1] == 'ESP_ERR_ESPNOW_NOT_FOUND':
             e.add_peer(peer)
         elif err.args[1] == 'ESP_ERR_ESPNOW_IF':
@@ -548,11 +586,11 @@ Wifi Signal Strength (RSSI) - (ESP32 only)
 
 The ESPnow module maintains a **peer device table** which contains the signal
 strength of the last received message for all known peers. The **peer device
-table** can be accessed using `ESPNow.peers` and can be used to track device
-proximity and identify *nearest neighbours* in a network of peer devices. This
-feature is **not** available on ESP8266 devices.
+table** can be accessed using `ESPNow.peers_table` and can be used to track
+device proximity and identify *nearest neighbours* in a network of peer
+devices. This feature is **not** available on ESP8266 devices.
 
-.. data:: ESPNow.peers
+.. data:: ESPNow.peers_table
 
     A reference to the **peer device table**: a dict of known peer devices
     and rssi values::
@@ -569,34 +607,36 @@ feature is **not** available on ESP8266 devices.
 
     Example::
 
-      >>> e.peers
+      >>> e.peers_table
       {b'\xaa\xaa\xaa\xaa\xaa\xaa': [-31, 18372],
        b'\xbb\xbb\xbb\xbb\xbb\xbb': [-43, 12541]}
 
-    **Note**: the ``mac`` addresses returned by `recv()` and `irecv()` are
-    references to the ``peer`` key values in the **peer device table**.
+    **Note**: the ``mac`` addresses returned by `recv()` are references to
+    the ``peer`` key values in the **peer device table**.
 
     **Note**: RSSI and timestamp values in the device table are updated only
-    when `ESPNow.irecv()` or `ESPNow.recv()` are called to read out the
-    incoming message.
+    when the message is read by the application.
 
-Supporting asyncio - (ESP32 Only)
----------------------------------
+Supporting asyncio
+------------------
 
 A supplementary module (`aioespnow`) is available to provide
 :doc:`uasyncio<uasyncio>` support.
 
+**Note:** Asyncio support is available on all ESP32 targets and the ESP8266
+GENERIC target (ie. ESP8266 devices with at least 2MB flash memory).
+
 A small async server example::
 
     import network
-    import aioespnow as espnow
+    import aioespnow
     import uasyncio as asyncio
 
     # A WLAN interface must be active to send()/recv()
     network.WLAN(network.STA_IF).active(True)
 
-    e = espnow.ESPNow()  # Returns AIOESPNow enhanced with async support
-    e.init()
+    e = aioespnow.AIOESPNow()  # Returns AIOESPNow enhanced with async support
+    e.active(True)
     peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'
     e.add_peer(peer)
 
@@ -630,35 +670,25 @@ A small async server example::
 .. module:: aioespnow
     :synopsis: ESP-NOW :doc:`uasyncio` support
 
-.. class:: AIOESPNow(e)
+.. class:: AIOESPNow()
 
-    Returns the singleton `AIOESPNow` object. The `AIOESPNow` class inherits
-    all the methods of `ESPNow<espnow.ESPNow>` and extends the interface with the
-    following async methods. The constructor takes an optional argument which
-    should be an existing `ESPNow<espnow.ESPNow>` instance.
+    The `AIOESPNow` class inherits all the methods of `ESPNow<espnow.ESPNow>`
+    and extends the interface with the following async methods.
 
 .. method:: async AIOESPNow.arecv()
-            async AIOESPNow.airecv()
 
-    Asyncio support for `ESPNow.recv()` and `ESPNow.irecv()`. Note that
-    these methods do not take a timeout value as argument.
+    Asyncio support for `ESPNow.recv()`. Note that this method does not take a
+    timeout value as argument.
+
+.. method:: async AIOESPNow.airecv()
+
+    Asyncio support for `ESPNow.irecv()`. Note that this method does not take a
+    timeout value as argument.
 
 .. method:: async AIOESPNow.asend(mac, msg, sync=True)
             async AIOESPNow.asend(msg)
 
     Asyncio support for `ESPNow.send()`.
-
-**Snippet:** Extend an already initialised `ESPNow<espnow.ESPNow>` with
-async support::
-
-    ...
-
-    from aioespnow import AIOESPNow
-    import uasyncio as asyncio
-
-    a = AIOESPNow(e)    # Return an asyncio enhanced ESPNow object
-
-    asyncio.run(a.airecv())
 
 **Snippet:** Use `AIOESPNow` as stand-in for `ESPNow<espnow.ESPNow>`::
 
@@ -667,32 +697,32 @@ async support::
 
     e = AIOESPNow()    # An ESPNow object extended with async support
 
-    e.init()
+    e.active(True)
     peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'
     e.add_peer(peer)
 
-    asyncio.run(e.asend(peer, b'ping'))
+    asyncio.run(e.airecv())
 
 .. function:: ESPNow()
 
-    Return the `AIOESPNow` singleton object. This is a convenience function
-    for adding async support to existing non-async code.
+    Return an `AIOESPNow` object. This is a convenience function for adding
+    async support to existing non-async code.
 
 **Snippet:** Transition from existing non-async code::
 
     import network
-    # from esp import espnow
+    # import espnow
     import aioespnow as espnow
 
-    e = espnow.ESPNow()
-    e.init()
+    e = espnow.ESPNow()  # Returns an AIOESPNow object
+    e.active(True)
     ...
 
 `AIOESPNow` also supports reading incoming messages by asynchronous
 iteration using ``async for``, eg::
 
     e = AIOESPNow()
-    e.init()
+    e.active(True)
 
     async def recv_till_halt(e):
         async for mac, msg in e:
@@ -701,12 +731,6 @@ iteration using ``async for``, eg::
               break
 
     asyncio.run(recv_till_halt(e))
-
-Stream IO interface - (deprecated)
-----------------------------------
-
-**The Stream IO interface support for reading and writing data is
-deprecated!!**
 
 Broadcast and Multicast
 -----------------------
@@ -773,7 +797,7 @@ when also connected to a wifi network:
 
    - Use ``WLAN(STA_IF).config(ps_mode=WIFI_PS_NONE)``
    - This requires the ESPNow patches on ESP32 (not supported in micropython
-     as of v1.17).
+     as of v1.19).
 
 2. Use the AP_IF interface to send/receive ESPNow traffic:
 
@@ -786,11 +810,11 @@ when also connected to a wifi network:
 **Example 1:** Disable power saving mode on STA_IF::
 
   import network
-  from esp import espnow
+  import espnow
 
   peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
   e = espnow.ESPNow()
-  e.init()
+  e.active(True)
 
   w0 = network.WLAN(network.STA_IF)
   w0.active(True)
@@ -808,15 +832,14 @@ when also connected to a wifi network:
 **Example 2:** Send and receive ESPNow traffic on AP_IF interface::
 
   import network
-  from esp import espnow
+  import espnow
 
   peer = b'feedee'                       # MAC address of peer
   e = espnow.ESPNow()
-  e.init()
+  e.active(True)
 
   w0 = network.WLAN(network.STA_IF)
   w0.active(True)                        # Set channel will fail unless Active
-  w0.config(channel=6)
   w0.connect('myssid', 'myppassword')
 
   w1 = network.WLAN(network.AP_IF)
@@ -869,11 +892,11 @@ sleep. If the ``STA_IF`` and ``AP_IF`` interfaces have both been set
 
   import network
   import machine
-  from esp import espnow
+  import espnow
 
   peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
   e = espnow.ESPNow()
-  e.init()
+  e.active(True)
 
   w0 = network.WLAN(network.STA_IF)
   w0.active(True)
@@ -883,7 +906,7 @@ sleep. If the ``STA_IF`` and ``AP_IF`` interfaces have both been set
   if not e.send(peer, b'ping'):
     print('Ping failed!')
 
-  e.deinit()
+  e.active(False)
   w0.active(False)                       # Disable the wifi before sleep
 
   print('Going to sleep...')
@@ -893,11 +916,11 @@ sleep. If the ``STA_IF`` and ``AP_IF`` interfaces have both been set
 
   import network
   import machine
-  from esp import espnow
+  import espnow
 
   peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
   e = espnow.ESPNow()
-  e.init()
+  e.active(True)
 
   w0 = network.WLAN(network.STA_IF)
   w0.active(True)                        # Set channel will fail unless Active
@@ -917,34 +940,3 @@ sleep. If the ``STA_IF`` and ``AP_IF`` interfaces have both been set
     w0.active(True)
     w0.config(channel=6)                 # Wifi loses config after lightsleep()
 
-Notes on using on_recv callbacks
---------------------------------
-
-The `ESPNow.config(on_recv=callback)<ESPNow.config()>` callback method is a
-convenient and responsive way of processing incoming espnow messages,
-especially if the data rate is moderate and the device is *not too busy* but
-there are some caveats:
-
-- The scheduler stack *can* easily overflow and callbacks will be missed if
-  packets are arriving at a sufficient rate. It is a good idea to readout all
-  available packets in the callback in case a prior callback has been missed,
-  eg::
-
-    def recv_cb2(e):
-        while e.poll():
-            print(e.irecv(0))
-    e.config(on_recv=recv_cb2)
-
-- Message callbacks may still be missed if the scheduler stack is
-  overflowed by other micropython components (eg, bluetooth,
-  machine.Pin.irq(), machine.timer, i2s, ...). Generally, this method may be
-  less reliable for dealing with intense bursts of messages, or high
-  throughput or on a device which is very busy dealing with other hardware
-  operations.
-
-- Take care if reading out messages with `irecv()` in the normal micropython
-  control flow *and* in ``on_recv`` callbacks, as the memory returned by
-  `irecv()` is shared.
-
-- For more information on *scheduled* function callbacks see:
-  `micropython.schedule()<micropython.schedule>`.
