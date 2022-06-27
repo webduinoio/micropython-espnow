@@ -236,8 +236,8 @@ receiving ESP-NOW messages. You can avoid this by calling
         - ``False`` send ``msg`` and return immediately. Responses from the
           peers will be discarded.
 
-      - ``size``: Send only the first ``size`` bytes of the message, otherwise
-        send the entire message
+      - ``size``: **(ESP32 only)** Send only the first ``size`` bytes of the
+        message, otherwise send the entire message
 
     .. data:: Returns:
 
