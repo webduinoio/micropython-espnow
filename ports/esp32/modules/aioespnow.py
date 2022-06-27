@@ -1,13 +1,12 @@
-# AIOESPNow module for MicroPython on ESP32
+# ESPNowX module for MicroPython on ESP32
 # MIT license; Copyright (c) 2022 Glenn Moloney @glenn20
 
 import uasyncio
-from esp import espnow
-
+import espnowio
 
 # Modelled on the uasyncio.Stream class (extmod/stream/stream.py)
 # NOTE: Relies on internal implementation of uasyncio.core (_io_queue)
-class AIOESPNow(espnow.ESPNow):
+class AIOESPNow(espnowio.ESPNowIO):
     def __init__(self, e=None):
         super().__init__()
 
@@ -20,11 +19,11 @@ class AIOESPNow(espnow.ESPNow):
         yield uasyncio.core._io_queue.queue_read(self)
         return self.irecv(0)
 
-    async def asend(self, mac, msg=None, sync=True):
+    async def asend(self, mac, msg=None, sync=None, size=None):
         if msg is None:
             msg, mac = mac, None  # If msg is None: swap mac and msg
         yield uasyncio.core._io_queue.queue_write(self)
-        return self.send(mac, msg, sync)
+        return self.send(mac, msg, sync, size)
 
     # async for support
     def __aiter__(self):
@@ -38,9 +37,3 @@ class AIOESPNow(espnow.ESPNow):
 #   import aioespnow as espnow
 def ESPNow():
     return AIOESPNow()
-
-
-MAX_DATA_LEN = espnow.MAX_DATA_LEN
-KEY_LEN = espnow.KEY_LEN
-MAX_TOTAL_PEER_NUM = espnow.MAX_TOTAL_PEER_NUM
-MAX_ENCRYPT_PEER_NUM = espnow.MAX_ENCRYPT_PEER_NUM
