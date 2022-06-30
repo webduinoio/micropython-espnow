@@ -44,6 +44,7 @@
 #include "py/objstr.h"
 #include "py/objarray.h"
 #include "py/stream.h"
+#include "py/binary.h"
 #include "esp_espnow.h"
 
 #include "mpconfigport.h"
@@ -243,9 +244,7 @@ STATIC void send_cb(uint8_t *mac_addr, uint8_t status) {
 // ESPNow packet.
 // If the buffer is full, drop the message and increment the dropped count.
 // Schedules the user callback if one has been registered (ESPNow.config()).
-STATIC void recv_cb(
-    uint8_t *mac_addr, uint8_t *msg, uint8_t msg_len) {
-
+STATIC void recv_cb(uint8_t *mac_addr, uint8_t *msg, uint8_t msg_len) {
     esp_espnow_obj_t *self = _get_singleton();
     buffer_t buf = self->recv_buffer;
     if (buf == NULL || sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
@@ -262,23 +261,26 @@ STATIC void recv_cb(
 
 // Return C pointer to byte memory string/bytes/bytearray in obj.
 // Raise ValueError if the length does not match expected len.
-static uint8_t *_get_bytes_len(mp_obj_t obj, int len) {
+static uint8_t *_get_bytes_len_rw(mp_obj_t obj, size_t len, mp_uint_t rw) {
     mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(obj, &bufinfo, MP_BUFFER_READ);
-    if (((int)bufinfo.len < -len) || ((len > 0) && ((int)bufinfo.len != len))) {
+    mp_get_buffer_raise(obj, &bufinfo, rw);
+    if (bufinfo.len != len) {
         mp_raise_ValueError(
             MP_ERROR_TEXT("ESPNow: bytes or bytearray wrong length"));
     }
     return (uint8_t *)bufinfo.buf;
 }
 
+static uint8_t *_get_bytes_len(mp_obj_t obj, size_t len) {
+    return _get_bytes_len_rw(obj, len, MP_BUFFER_READ);
+}
+
+static uint8_t *_get_bytes_len_w(mp_obj_t obj, size_t len) {
+    return _get_bytes_len_rw(obj, len, MP_BUFFER_WRITE);
+}
+
 // ### Handling espnow packets in the recv buffer
 //
-
-// The tuple returned by recv() on timeout: (None, None)
-static const mp_rom_obj_tuple_t none_tuple = {
-    {&mp_type_tuple}, 2, {mp_const_none, mp_const_none}
-};
 
 // ESPNow.recv([timeout_ms, []]):
 // Returns a list of byte strings: (peer_addr, message) where peer_addr is
@@ -288,86 +290,68 @@ static const mp_rom_obj_tuple_t none_tuple = {
 //      buffers: list of bytearrays to store values: [peer, message].
 // Default timeout is set with ESPNow.config(timeout=milliseconds).
 // Return (None, None) on timeout.
-STATIC mp_obj_t espnow_recv(size_t n_args, const mp_obj_t *args) {
+STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton_initialised();
 
-    size_t timeout_ms = (
-        (n_args > 1 && args[1] != mp_const_none)
-            ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
+    size_t timeout_ms = ((n_args > 2 && args[2] != mp_const_none)
+            ? mp_obj_get_int(args[2]) : self->recv_timeout_ms);
 
-    mp_obj_list_t *list = NULL;
-    if (n_args > 2) {
-        // Use the provided storage for peer and message
-        list = args[2];
-        mp_obj_array_t *peer, *msg;
-        if (!mp_obj_is_type(list, &mp_type_list) || list->len < 2 ||
-            !mp_obj_is_type(
-                (peer = MP_OBJ_TO_PTR(list->items[0])), &mp_type_bytearray) ||
-            peer->len != ESP_NOW_ETH_ALEN ||
-            !mp_obj_is_type(
-                (msg = MP_OBJ_TO_PTR(list->items[1])), &mp_type_bytearray) ||
-            msg->len + msg->free < ESP_NOW_MAX_DATA_LEN) {
-            mp_raise_TypeError(
-                MP_ERROR_TEXT("ESPNow.recv(): invalid buffer list"));
-        }
-        msg->len += msg->free;   // Make all the space in msg available
+    mp_obj_list_t *list = MP_OBJ_TO_PTR(args[1]);
+    if (!mp_obj_is_type(list, &mp_type_list) || list->len < 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recvinto(): Invalid argument"));
+    }
+    mp_obj_array_t *msg = MP_OBJ_TO_PTR(list->items[1]);
+    if (mp_obj_is_type(msg, &mp_type_bytearray)) {
+        msg->len += msg->free;   // Make all the space in msg array available
         msg->free = 0;
     }
+    uint8_t *peer_buf = _get_bytes_len_w(list->items[0], ESP_NOW_ETH_ALEN);
+    uint8_t *msg_buf = _get_bytes_len_w(msg, ESP_NOW_MAX_DATA_LEN);
 
     // Read the packet header from the incoming buffer
     espnow_hdr_t hdr;
     if (!buffer_recv(self->recv_buffer, &hdr, sizeof(hdr), timeout_ms)) {
-        return MP_OBJ_FROM_PTR(&none_tuple);    // Timeout waiting for packet
+        return MP_OBJ_NEW_SMALL_INT(0);    // Timeout waiting for packet
     }
     int msg_len = hdr.msg_len;
-
-    if (!list) {
-        // Allocate new storage for the peer and message
-        static byte tmp[ESP_NOW_MAX_DATA_LEN]; // Make static to save 28 bytes
-        list = mp_obj_new_list(2,
-            (mp_obj_t [2]) {
-            mp_obj_new_bytes(tmp, ESP_NOW_ETH_ALEN),
-            mp_obj_new_bytes(tmp, msg_len)
-        });
-    }
 
     // Check the message packet header format and read the message data
     if (hdr.magic != ESPNOW_MAGIC ||
         msg_len > ESP_NOW_MAX_DATA_LEN ||
-        !buffer_get(self->recv_buffer, _get_bytes_len(list->items[0], ESP_NOW_ETH_ALEN), ESP_NOW_ETH_ALEN) ||
-        !buffer_get(self->recv_buffer, _get_bytes_len(list->items[1], -msg_len), msg_len)) {
+        !buffer_get(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) ||
+        !buffer_get(self->recv_buffer, msg_buf, msg_len)) {
         mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recv(): buffer error"));
     }
-    if (n_args > 2) {
+    if (mp_obj_is_type(msg, &mp_type_bytearray)) {
         // Set the length of the message bytearray.
-        mp_obj_array_t *msg = MP_OBJ_TO_PTR(list->items[1]);
         size_t size = msg->len + msg->free;
         msg->len = msg_len;
         msg->free = size - msg_len;
+    } else if (mp_obj_is_type(msg, &mp_type_memoryview) &&
+               mp_binary_get_size('@', msg->typecode, NULL) == sizeof(char)) {
+        msg->len = msg_len;
     }
 
-    // Return the list of byte strings or bytearrays
-    return list;
+    return MP_OBJ_NEW_SMALL_INT(msg_len);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recv_obj, 1, 3, espnow_recv);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recvinto_obj, 2, 3, espnow_recvinto);
 
 // Used by espnow_send() for sends() with sync==True.
 // Wait till all pending sent packet responses have been received.
 // ie. self->tx_responses == self->tx_packets.
 // Return the number of responses where status != ESP_NOW_SEND_SUCCESS.
 static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
-    // Note: the loop timeout is just a fallback - in normal operation
-    // we should never reach that timeout.
     for (int i = 0; i < 90 && self->tx_responses < self->tx_packets; i++) {
         // Won't yield unless delay > portTICK_PERIOD_MS (10ms)
         mp_hal_delay_ms(BUSY_WAIT_MS);
     }
+    // Note: the loop timeout is just a fallback - in normal operation
+    // we should never reach that timeout.
 }
 
 // ESPNow.send(peer_addr, message, [sync (=true)])
 // ESPNow.send(message)
 // Send a message to the peer's mac address. Optionally wait for a response.
-// If peer_addr == None, send to all registered peers.
 // If sync == True, wait for response after sending.
 // Returns:
 //   True  if sync==False and message sent successfully.
@@ -377,36 +361,25 @@ static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
 STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton_initialised();
 
+    bool sync = n_args <= 3 || args[3] == mp_const_none || mp_obj_is_true(args[3]);
     // Get a pointer to the buffer of obj
     mp_buffer_info_t message;
     mp_get_buffer_raise(args[2], &message, MP_BUFFER_READ);
 
     // Bugfix: esp_now_send() generates a panic if message buffer points
     // to an address in ROM (eg. a statically interned QSTR).
-    // See https://github.com/glenn20/micropython-espnow-images/issues/7
-    // Fix: if message is in ROM, copy to a temp buffer on the stack.
-    #if 1
-    static char temp[ESP_NOW_MAX_DATA_LEN];
+    // Fix: if message is not in gc pool, copy to a temp buffer.
+    static char temp[ESP_NOW_MAX_DATA_LEN];  // Static to save code space
     byte *p = (byte *)message.buf;
     if (p < MP_STATE_MEM(gc_pool_start) || MP_STATE_MEM(gc_pool_end) < p) {
         // If buffer is not in GC pool copy from ROM to stack
         memcpy(temp, message.buf, message.len);
         message.buf = temp;
     }
-    #else
-    // To save code space on esp8266..
-    char temp[message.len];
-    memcpy(temp, message.buf, message.len);
-    message.buf = temp;
-    #endif
 
-    bool sync = (n_args <= 3 || mp_obj_is_true(args[3]));
     if (sync) {
-        // If the last call was sync==False there may be outstanding responses
-        // still to be received (possible many if we just had a burst of
-        // unsync send()s). We need to wait for all pending responses if this
-        // call has sync=True.
-        // Flush out any pending responses.
+        // If the last call was sync==False there may be outstanding responses.
+        // We need to wait for all pending responses if this call has sync=True.
         _wait_for_pending_responses(self);
     }
     int saved_failures = self->tx_failures;
@@ -428,7 +401,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 3, 4, espnow_send);
 //
 
 // Set the ESP-NOW Primary Master Key (pmk) (for encrypted communications).
-// Raise OSError if ESP-NOW functions are not initialised.
+// Raise OSError if not initialised.
 // Raise ValueError if key is not a bytes-like object exactly 16 bytes long.
 STATIC mp_obj_t espnow_set_pmk(mp_obj_t _, mp_obj_t key) {
     check_esp_err(esp_now_set_kok(
@@ -437,17 +410,13 @@ STATIC mp_obj_t espnow_set_pmk(mp_obj_t _, mp_obj_t key) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_set_pmk_obj, espnow_set_pmk);
 
-// ESPNow.add_peer(peer_mac, [lmk, [channel, [ifidx, [encrypt]]]]) or
-// ESPNow.add_peer(peer_mac, [lmk=b'0123456789abcdef'|b''|None|False],
-//          [channel=1..11|0], [ifidx=0|1], [encrypt=True|False])
+// ESPNow.add_peer(peer_mac, [lmk, [channel, [ifidx, [encrypt]]]])
 // Positional args set to None will be left at defaults.
-// Raise OSError if ESPNow.init() has not been called.
+// Raise OSError if not initialised.
 // Raise ValueError if mac or LMK are not bytes-like objects or wrong length.
 // Raise TypeError if invalid keyword args or too many positional args.
 // Return None.
-STATIC mp_obj_t espnow_add_peer(
-    size_t n_args, const mp_obj_t *args) {
-
+STATIC mp_obj_t espnow_add_peer(size_t n_args, const mp_obj_t *args) {
     check_esp_err(
         esp_now_add_peer(
             _get_bytes_len(args[1], ESP_NOW_ETH_ALEN),
@@ -461,7 +430,7 @@ STATIC mp_obj_t espnow_add_peer(
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_add_peer_obj, 2, 4, espnow_add_peer);
 
 // ESPNow.del_peer(peer_mac): Unregister peer_mac.
-// Raise OSError if ESPNow.init() has not been called.
+// Raise OSError if not initialised.
 // Raise ValueError if peer is not a bytes-like objects or wrong length.
 // Return None.
 STATIC mp_obj_t espnow_del_peer(mp_obj_t _, mp_obj_t peer) {
@@ -473,7 +442,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_del_peer_obj, espnow_del_peer);
 STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&espnow_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&espnow_config_obj) },
-    { MP_ROM_QSTR(MP_QSTR_recv), MP_ROM_PTR(&espnow_recv_obj) },
+    { MP_ROM_QSTR(MP_QSTR_recvinto), MP_ROM_PTR(&espnow_recvinto_obj) },
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&espnow_send_obj) },
 
     // Peer management functions
