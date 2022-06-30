@@ -51,6 +51,15 @@
 #include "shared/runtime/ring_buffer.h"
 #include "esp_espnow.h"
 
+#ifndef MICROPY_ESPNOW_RSSI
+// Include code to track rssi of peers
+#define MICROPY_ESPNOW_RSSI 1
+#endif
+#ifndef MICROPY_ESPNOW_EXTRA_PEER_METHODS
+// Include mod_peer(),get_peer(),peer_count()
+#define MICROPY_ESPNOW_EXTRA_PEER_METHODS 1
+#endif
+
 // Relies on gcc Variadic Macros and Statement Expressions
 #define NEW_TUPLE(...) \
     ({mp_obj_t _z[] = {__VA_ARGS__}; mp_obj_new_tuple(MP_ARRAY_SIZE(_z), _z); })
@@ -62,8 +71,10 @@ static const uint8_t ESPNOW_MAGIC = 0x99;
 typedef struct {
     uint8_t magic;              // = ESPNOW_MAGIC
     uint8_t msg_len;            // Length of the message
-    uint32_t timestamp_ms;      // Timestamp (ms) when packet is received
+    #if MICROPY_ESPNOW_RSSI
+    uint32_t time_ms;           // Timestamp (ms) when packet is received
     int8_t rssi;                // RSSI value (dBm) (-127 to 0)
+    #endif // MICROPY_ESPNOW_RSSI
 } __attribute__((packed)) espnow_hdr_t;
 
 typedef struct {
@@ -91,9 +102,6 @@ static const size_t DEFAULT_SEND_TIMEOUT_MS = (2 * 1000);
 // Needs to be >15ms to permit yield to other tasks.
 static const size_t BUSY_WAIT_MS = 25;
 
-// RECV_DATA event code for irq function
-static const size_t EVENT_RECV_DATA = 1;
-
 // The data structure for the espnow_singleton.
 typedef struct _esp_espnow_obj_t {
     mp_obj_base_t base;
@@ -107,7 +115,9 @@ typedef struct _esp_espnow_obj_t {
     volatile size_t tx_failures;    // # of sent packet responses failed
     size_t peer_count;              // Cache the # of peers for send(sync=True)
     mp_obj_t recv_cb;               // Callback when a packet is received
+    #if MICROPY_ESPNOW_RSSI
     mp_obj_t peers_table;           // A dictionary of discovered peers
+    #endif // MICROPY_ESPNOW_RSSI
 } esp_espnow_obj_t;
 
 const mp_obj_type_t esp_espnow_type;
@@ -152,9 +162,11 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
     self->recv_timeout_ms = DEFAULT_RECV_TIMEOUT_MS;
     self->recv_buffer = NULL;       // Buffer is allocated in espnow_init()
     self->recv_cb = mp_const_none;
+    #if MICROPY_ESPNOW_RSSI
     self->peers_table = mp_obj_new_dict(0);
     // Prevent user code modifying the dict
     mp_obj_dict_get_map(self->peers_table)->is_fixed = 1;
+    #endif // MICROPY_ESPNOW_RSSI
 
     // Set the global singleton pointer for the espnow protocol.
     MP_STATE_PORT(espnow_singleton) = self;
@@ -297,6 +309,7 @@ STATIC mp_obj_t espnow_stats(mp_obj_t _) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_stats_obj, espnow_stats);
 
+#if MICROPY_ESPNOW_RSSI
 // ### Maintaining the peer table and reading RSSI values
 //
 // We maintain a peers table for several reasons, to:
@@ -382,12 +395,11 @@ static mp_map_elem_t *_lookup_add_peer(
 // Update the peers table with the new rssi value from a received pkt and
 // return a reference to the item in the peers_table.
 static mp_map_elem_t *_update_rssi(
-    esp_espnow_obj_t *self, const uint8_t *peer,
-    int8_t rssi, uint32_t timestamp_ms) {
+    const uint8_t *peer, int8_t rssi, uint32_t time_ms) {
 
+    esp_espnow_obj_t *self = _get_singleton_initialised();
     // Lookup the peer in the device table
     mp_map_elem_t *item = _lookup_add_peer(self, peer);
-
     // Ensure the item value is a list with at least 2 entries
     mp_obj_list_t *list = MP_OBJ_TO_PTR(item->value);
     if (list == NULL || list->len < 2) {
@@ -400,104 +412,110 @@ static mp_map_elem_t *_update_rssi(
     // item->key = peer MAC Address (byte string)
     // item->value = [rssi, timestamp_ms]
     list->items[0] = MP_OBJ_NEW_SMALL_INT(rssi);
-    list->items[1] = MP_OBJ_NEW_SMALL_INT(timestamp_ms);
-
+    list->items[1] = mp_obj_new_int(time_ms);
     return item;
 }
+#endif // MICROPY_ESPNOW_RSSI
 
 // ### Handling espnow packets in the recv buffer
 //
 
+// ### Send and Receive ESP_Now data
+//
+
 // Return C pointer to byte memory string/bytes/bytearray in obj.
 // Raise ValueError if the length does not match expected len.
-static uint8_t *_get_bytes_at_least_len(mp_obj_t obj, size_t len) {
+static uint8_t *_get_bytes_len_rw(mp_obj_t obj, size_t len, mp_uint_t rw) {
     mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(obj, &bufinfo, MP_BUFFER_READ);
-    if (bufinfo.len < len) {
-        mp_raise_ValueError(MP_ERROR_TEXT("wrong length"));
+    mp_get_buffer_raise(obj, &bufinfo, rw);
+    if (bufinfo.len != len) {
+        mp_raise_ValueError(
+            MP_ERROR_TEXT("ESPNow: bytes or bytearray wrong length"));
     }
     return (uint8_t *)bufinfo.buf;
 }
 
-// ### Send and Receive ESP_Now data
-//
+static uint8_t *_get_bytes_len(mp_obj_t obj, size_t len) {
+    return _get_bytes_len_rw(obj, len, MP_BUFFER_READ);
+}
 
-// The tuple returned by recv() on timeout: (None, None)
-static const mp_rom_obj_tuple_t none_tuple = {
-    {&mp_type_tuple}, 2, {mp_const_none, mp_const_none}
-};
+static uint8_t *_get_bytes_len_w(mp_obj_t obj, size_t len) {
+    return _get_bytes_len_rw(obj, len, MP_BUFFER_WRITE);
+}
 
-// ESPNow.recv([timeout_ms, [buffers]]):
-// Returns a list of byte strings: (peer_addr, message) where peer_addr is
-// the MAC address of the sending peer.
+// Return C pointer to the MAC address.
+// Raise ValueError if mac_addr is wrong type or is not 6 bytes long.
+static const uint8_t *_get_peer(mp_obj_t mac_addr) {
+    return mp_obj_is_true(mac_addr)
+        ? _get_bytes_len(mac_addr, ESP_NOW_ETH_ALEN) : NULL;
+}
+
+// ESPNow.recvinto(buffers[, timeout_ms]):
+// Waits for an espnow message and copies the peer_addr and message into
+// the buffers list.
 // Arguments:
-//      timeout_ms: (Optional) timeout in milliseconds (or None).
 //      buffers: (Optional) list of bytearrays to store return values.
+//      timeout_ms: (Optional) timeout in milliseconds (or None).
+// Buffers should be a list: [bytearray(6), bytearray(250)]
+// If buffers is 4 elements long, the rssi and timestamp values will be
+// loaded into the 3rd and 4th elements.
 // Default timeout is set with ESPNow.config(timeout=milliseconds).
 // Return (None, None) on timeout.
-STATIC mp_obj_t espnow_recv(size_t n_args, const mp_obj_t *args) {
+STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton_initialised();
 
-    size_t timeout_ms = (
-        (n_args > 1 && args[1] != mp_const_none)
-            ? mp_obj_get_int(args[1]) : self->recv_timeout_ms);
+    size_t timeout_ms = ((n_args > 2 && args[2] != mp_const_none)
+            ? mp_obj_get_int(args[2]) : self->recv_timeout_ms);
 
-    mp_obj_list_t *list = NULL;
-    if (n_args > 2) {
-        // Use the provided storage for peer and message
-        list = args[2];
-        mp_obj_array_t *msg;
-        if (!mp_obj_is_type(list, &mp_type_list) || list->len < 2 ||
-            !mp_obj_is_type(
-                (msg = MP_OBJ_TO_PTR(list->items[1])), &mp_type_bytearray) ||
-            msg->len + msg->free < ESP_NOW_MAX_DATA_LEN) {
-            mp_raise_TypeError(
-                MP_ERROR_TEXT("ESPNow.recv(): invalid buffer list"));
-        }
-        msg->len += msg->free;   // Make all the space in msg available
+    mp_obj_list_t *list = MP_OBJ_TO_PTR(args[1]);
+    if (!mp_obj_is_type(list, &mp_type_list) || list->len < 2) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recvinto(): Invalid argument"));
+    }
+    mp_obj_array_t *msg = MP_OBJ_TO_PTR(list->items[1]);
+    if (mp_obj_is_type(msg, &mp_type_bytearray)) {
+        msg->len += msg->free;   // Make all the space in msg array available
         msg->free = 0;
     }
+    #if MICROPY_ESPNOW_RSSI
+    uint8_t peer_buf[ESP_NOW_ETH_ALEN];
+    #else
+    uint8_t *peer_buf = _get_bytes_len_w(list->items[0], ESP_NOW_ETH_ALEN);
+    #endif // MICROPY_ESPNOW_RSSI
+    uint8_t *msg_buf = _get_bytes_len_w(msg, ESP_NOW_MAX_DATA_LEN);
 
     // Read the packet header from the incoming buffer
-    espnow_pkt_t pkt;
-    if (!buffer_recv(self->recv_buffer, &pkt, sizeof(pkt), timeout_ms)) {
-        return MP_OBJ_FROM_PTR(&none_tuple);    // Timeout waiting for packet
+    espnow_hdr_t hdr;
+    if (!buffer_recv(self->recv_buffer, &hdr, sizeof(hdr), timeout_ms)) {
+        return MP_OBJ_NEW_SMALL_INT(0);    // Timeout waiting for packet
     }
-    int msg_len = pkt.hdr.msg_len;
-
-    if (list == NULL) {
-        // Allocate a new list and byte string to return the peer & message
-        byte tmp[ESP_NOW_MAX_DATA_LEN];
-        list = mp_obj_new_list(2,
-            (mp_obj_t [2]) {
-            mp_const_none,
-            mp_obj_new_bytes(tmp, msg_len)
-        });
-    }
+    int msg_len = hdr.msg_len;
 
     // Check the message packet header format and read the message data
-    if (pkt.hdr.magic != ESPNOW_MAGIC ||
+    if (hdr.magic != ESPNOW_MAGIC ||
         msg_len > ESP_NOW_MAX_DATA_LEN ||
-        !buffer_get(self->recv_buffer,
-            _get_bytes_at_least_len(list->items[1], msg_len), msg_len)) {
-        mp_raise_ValueError(MP_ERROR_TEXT("ESP-Now: Bad packet"));
+        !buffer_get(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) ||
+        !buffer_get(self->recv_buffer, msg_buf, msg_len)) {
+        mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recv(): buffer error"));
     }
-    if (n_args > 2) {
+    if (mp_obj_is_type(msg, &mp_type_bytearray)) {
         // Set the length of the message bytearray.
-        mp_obj_array_t *msg = MP_OBJ_TO_PTR(list->items[1]);
         size_t size = msg->len + msg->free;
         msg->len = msg_len;
         msg->free = size - msg_len;
     }
 
-    // Update the rssi value in device table and return the dict key as peer
-    list->items[0] = _update_rssi(
-        self, pkt.peer, pkt.hdr.rssi, pkt.hdr.timestamp_ms)->key;
+    #if MICROPY_ESPNOW_RSSI
+    // Update rssi value in device table and set first element of list to peer
+    list->items[0] = _update_rssi(peer_buf, hdr.rssi, hdr.time_ms)->key;
+    if (list->len >= 4) {
+        list->items[2] = MP_OBJ_NEW_SMALL_INT(hdr.rssi);
+        list->items[3] = mp_obj_new_int(hdr.time_ms);
+    }
+    #endif // MICROPY_ESPNOW_RSSI
 
-    // Return the list of [peer, message]
-    return list;
+    return MP_OBJ_NEW_SMALL_INT(msg_len);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recv_obj, 1, 3, espnow_recv);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recvinto_obj, 2, 3, espnow_recvinto);
 
 // Test if data is available to read from the buffers
 STATIC mp_obj_t espnow_any(const mp_obj_t _) {
@@ -507,40 +525,20 @@ STATIC mp_obj_t espnow_any(const mp_obj_t _) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_any_obj, espnow_any);
 
-// Used by _do_espnow_send() for sends() with sync==True.
+// Used by espnow_send() for sends() with sync==True.
 // Wait till all pending sent packet responses have been received.
 // ie. self->tx_responses == self->tx_packets.
 // Return the number of responses where status != ESP_NOW_SEND_SUCCESS.
 static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
-    int64_t start = mp_hal_ticks_ms();
-    // Note: the send timeout is just a fallback - in normal operation
-    // we should never reach that timeout.
-    while (self->tx_responses < self->tx_packets &&
-           (mp_hal_ticks_ms() - start) <= DEFAULT_SEND_TIMEOUT_MS) {
+    for (int i = 0; i < 90 && self->tx_responses < self->tx_packets; i++) {
         // Won't yield unless delay > portTICK_PERIOD_MS (10ms)
         mp_hal_delay_ms(BUSY_WAIT_MS);
     }
     if (self->tx_responses != self->tx_packets) {
+        // Note: the loop timeout is just a fallback - in normal operation
+        // we should never reach that timeout.
         mp_raise_ValueError(MP_ERROR_TEXT("Send timeout on synch."));
     }
-}
-
-// Return C pointer to byte memory string/bytes/bytearray in obj.
-// Raise ValueError if the length does not match expected len.
-static const uint8_t *_get_bytes_len(mp_obj_t obj, size_t len) {
-    mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(obj, &bufinfo, MP_BUFFER_READ);
-    if (bufinfo.len != len) {
-        mp_raise_ValueError(MP_ERROR_TEXT("wrong length"));
-    }
-    return (const uint8_t *)bufinfo.buf;
-}
-
-// Return C pointer to the MAC address.
-// Raise ValueError if mac_addr is wrong type or is not 6 bytes long.
-static const uint8_t *_get_peer(mp_obj_t mac_addr) {
-    return mp_obj_is_true(mac_addr)
-        ? _get_bytes_len(mac_addr, ESP_NOW_ETH_ALEN) : NULL;
 }
 
 // ESPNow.send(peer_addr, message, [sync (=true), size])
@@ -559,17 +557,11 @@ STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     // Check the various combinations of input arguments
     const uint8_t *peer = (n_args > 2) ? _get_peer(args[1]) : NULL;
     mp_obj_t msg = (n_args > 2) ? args[2] : (n_args == 2) ? args[1] : MP_OBJ_NULL;
-    bool sync = (n_args > 3 && args[3] != mp_const_none)
-        ? mp_obj_is_true(args[3]) : true;
-    mp_int_t size = (n_args > 4 && args[4] != mp_const_none)
-        ? mp_obj_get_int(args[4]) : -1;
+    bool sync = n_args <= 3 || args[3] == mp_const_none || mp_obj_is_true(args[3]);
 
     // Get a pointer to the data buffer of the message
     mp_buffer_info_t message;
     mp_get_buffer_raise(msg, &message, MP_BUFFER_READ);
-    if (size > 0) {
-        message.len = MIN(size, message.len);
-    }
 
     if (sync) {
         // Flush out any pending responses.
@@ -600,7 +592,7 @@ STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     // Return False if sync and any peers did not respond.
     return mp_obj_new_bool(!(sync && self->tx_failures != saved_failures));
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 2, 5, espnow_send);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 2, 4, espnow_send);
 
 // ### The ESP_Now send and recv callback routines
 //
@@ -617,17 +609,6 @@ STATIC void send_cb(
         self->tx_failures++;
     }
 }
-
-static mp_obj_t espnow_recv_cb_wrapper(mp_obj_t _) {
-    esp_espnow_obj_t *self = _get_singleton();
-    mp_obj_t args[] = {self, MP_OBJ_NEW_SMALL_INT(0)}; // Set timeout to 0
-    mp_obj_t data = mp_call_function_n_kw(      // Read a message from buffer
-        MP_OBJ_FROM_PTR(&espnow_recv_obj), 2, 0, args);
-    mp_call_function_2(
-        self->recv_cb, MP_OBJ_NEW_SMALL_INT(EVENT_RECV_DATA), data);
-    return mp_const_none;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_recv_cb_wrapper_obj, espnow_recv_cb_wrapper);
 
 // Callback triggered when an ESP-Now packet is received.
 // Write the peer MAC address and the message into the recv_buffer as an
@@ -646,15 +627,17 @@ STATIC void recv_cb(
     espnow_hdr_t header;
     header.magic = ESPNOW_MAGIC;
     header.msg_len = msg_len;
+    #if MICROPY_ESPNOW_RSSI
     header.rssi = _get_rssi_from_wifi_pkt(msg);
-    header.timestamp_ms = mp_hal_ticks_ms();
+    header.time_ms = mp_hal_ticks_ms();
+    #endif // MICROPY_ESPNOW_RSSI
 
     buffer_put(buf, &header, sizeof(header));
     buffer_put(buf, mac_addr, ESP_NOW_ETH_ALEN);
     buffer_put(buf, msg, msg_len);
     self->rx_packets++;
     if (self->recv_cb != mp_const_none) {
-        mp_sched_schedule(MP_OBJ_FROM_PTR(&espnow_recv_cb_wrapper_obj), self);
+        mp_sched_schedule(self->recv_cb, self);
     }
 }
 
@@ -751,6 +734,68 @@ STATIC mp_obj_t espnow_add_peer(
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_add_peer_obj, 2, espnow_add_peer);
 
+// ESPNow.del_peer(peer_mac): Unregister peer_mac.
+// Raise OSError if ESPNow.init() has not been called.
+// Raise ValueError if peer is not a bytes-like objects or wrong length.
+// Return None.
+STATIC mp_obj_t espnow_del_peer(mp_obj_t _, mp_obj_t peer) {
+    uint8_t peer_addr[ESP_NOW_ETH_ALEN];
+    memcpy(peer_addr, _get_peer(peer), ESP_NOW_ETH_ALEN);
+
+    check_esp_err(esp_now_del_peer(peer_addr));
+    _update_peer_count();
+
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_del_peer_obj, espnow_del_peer);
+
+// Convert a peer_info struct to python tuple
+// Used by espnow_get_peer() and espnow_get_peers()
+static mp_obj_t _peer_info_to_tuple(const esp_now_peer_info_t *peer) {
+    return NEW_TUPLE(
+        mp_obj_new_bytes(peer->peer_addr, MP_ARRAY_SIZE(peer->peer_addr)),
+        mp_obj_new_bytes(peer->lmk, MP_ARRAY_SIZE(peer->lmk)),
+        mp_obj_new_int(peer->channel),
+        mp_obj_new_int(peer->ifidx),
+        (peer->encrypt) ? mp_const_true : mp_const_false);
+}
+
+// ESPNow.get_peers(): Fetch peer_info records for all registered ESPNow peers.
+// Raise OSError if ESPNow.init() has not been called.
+// Return a tuple of tuples:
+//     ((peer_addr, lmk, channel, ifidx, encrypt),
+//      (peer_addr, lmk, channel, ifidx, encrypt), ...)
+STATIC mp_obj_t espnow_get_peers(mp_obj_t _) {
+    esp_espnow_obj_t *self = _get_singleton_initialised();
+
+    // Build and initialise the peer info tuple.
+    mp_obj_tuple_t *peerinfo_tuple = mp_obj_new_tuple(self->peer_count, NULL);
+    esp_now_peer_info_t peer = {0};
+    for (int i = 0; i < peerinfo_tuple->len; i++) {
+        int status = esp_now_fetch_peer((i == 0), &peer);
+        peerinfo_tuple->items[i] =
+            (status == ESP_OK ? _peer_info_to_tuple(&peer) : mp_const_none);
+    }
+
+    return peerinfo_tuple;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_get_peers_obj, espnow_get_peers);
+
+#if MICROPY_ESPNOW_EXTRA_PEER_METHODS
+// ESPNow.get_peer(peer_mac): Get the peer info for peer_mac as a tuple.
+// Raise OSError if ESPNow.init() has not been called.
+// Raise ValueError if mac or LMK are not bytes-like objects or wrong length.
+// Return a tuple of (peer_addr, lmk, channel, ifidx, encrypt).
+STATIC mp_obj_t espnow_get_peer(mp_obj_t _, mp_obj_t arg1) {
+    esp_now_peer_info_t peer = {0};
+    memcpy(peer.peer_addr, _get_peer(arg1), ESP_NOW_ETH_ALEN);
+
+    check_esp_err(esp_now_get_peer(peer.peer_addr, &peer));
+
+    return _peer_info_to_tuple(&peer);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_get_peer_obj, espnow_get_peer);
+
 // ESPNow.mod_peer(peer_mac, [lmk, [channel, [ifidx, [encrypt]]]]) or
 // ESPNow.mod_peer(peer_mac, [lmk=b'0123456789abcdef'|b''|None|False],
 //          [channel=1..11|0], [ifidx=0|1], [encrypt=True|False])
@@ -775,67 +820,6 @@ STATIC mp_obj_t espnow_mod_peer(
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_mod_peer_obj, 2, espnow_mod_peer);
 
-// Convert a peer_info struct to python tuple
-// Used by espnow_get_peer() and espnow_get_peers()
-static mp_obj_t peer_info_to_tuple(const esp_now_peer_info_t *peer) {
-    return NEW_TUPLE(
-        mp_obj_new_bytes(peer->peer_addr, MP_ARRAY_SIZE(peer->peer_addr)),
-        mp_obj_new_bytes(peer->lmk, MP_ARRAY_SIZE(peer->lmk)),
-        mp_obj_new_int(peer->channel),
-        mp_obj_new_int(peer->ifidx),
-        (peer->encrypt) ? mp_const_true : mp_const_false);
-}
-
-// ESPNow.get_peer(peer_mac): Get the peer info for peer_mac as a tuple.
-// Raise OSError if ESPNow.init() has not been called.
-// Raise ValueError if mac or LMK are not bytes-like objects or wrong length.
-// Return a tuple of (peer_addr, lmk, channel, ifidx, encrypt).
-STATIC mp_obj_t espnow_get_peer(mp_obj_t _, mp_obj_t arg1) {
-    esp_now_peer_info_t peer = {0};
-    memcpy(peer.peer_addr, _get_peer(arg1), ESP_NOW_ETH_ALEN);
-
-    check_esp_err(esp_now_get_peer(peer.peer_addr, &peer));
-
-    return peer_info_to_tuple(&peer);
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_get_peer_obj, espnow_get_peer);
-
-// ESPNow.del_peer(peer_mac): Unregister peer_mac.
-// Raise OSError if ESPNow.init() has not been called.
-// Raise ValueError if peer is not a bytes-like objects or wrong length.
-// Return None.
-STATIC mp_obj_t espnow_del_peer(mp_obj_t _, mp_obj_t peer) {
-    uint8_t peer_addr[ESP_NOW_ETH_ALEN];
-    memcpy(peer_addr, _get_peer(peer), ESP_NOW_ETH_ALEN);
-
-    check_esp_err(esp_now_del_peer(peer_addr));
-    _update_peer_count();
-
-    return mp_const_none;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_del_peer_obj, espnow_del_peer);
-
-// ESPNow.get_peers(): Fetch peer_info records for all registered ESPNow peers.
-// Raise OSError if ESPNow.init() has not been called.
-// Return a tuple of tuples:
-//     ((peer_addr, lmk, channel, ifidx, encrypt),
-//      (peer_addr, lmk, channel, ifidx, encrypt), ...)
-STATIC mp_obj_t espnow_get_peers(mp_obj_t _) {
-    esp_espnow_obj_t *self = _get_singleton_initialised();
-
-    // Build and initialise the peer info tuple.
-    mp_obj_tuple_t *peerinfo_tuple = mp_obj_new_tuple(self->peer_count, NULL);
-    esp_now_peer_info_t peer = {0};
-    for (int i = 0; i < peerinfo_tuple->len; i++) {
-        int status = esp_now_fetch_peer((i == 0), &peer);
-        peerinfo_tuple->items[i] =
-            (status == ESP_OK ? peer_info_to_tuple(&peer) : mp_const_none);
-    }
-
-    return peerinfo_tuple;
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_get_peers_obj, espnow_get_peers);
-
 // ESPNow.espnow_peer_count(): Get the number of registered peers.
 // Raise OSError if ESPNow.init() has not been called.
 // Return a tuple of (num_total_peers, num_encrypted_peers).
@@ -848,6 +832,7 @@ STATIC mp_obj_t espnow_peer_count(mp_obj_t _) {
         mp_obj_new_int(peer_num.encrypt_num));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
+#endif
 
 STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&espnow_active_obj) },
@@ -856,18 +841,20 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&espnow_stats_obj) },
 
     // Send and receive messages
-    { MP_ROM_QSTR(MP_QSTR_recv), MP_ROM_PTR(&espnow_recv_obj) },
+    { MP_ROM_QSTR(MP_QSTR_recvinto), MP_ROM_PTR(&espnow_recvinto_obj) },
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&espnow_send_obj) },
     { MP_ROM_QSTR(MP_QSTR_any), MP_ROM_PTR(&espnow_any_obj) },
 
     // Peer management functions
     { MP_ROM_QSTR(MP_QSTR_set_pmk), MP_ROM_PTR(&espnow_set_pmk_obj) },
     { MP_ROM_QSTR(MP_QSTR_add_peer), MP_ROM_PTR(&espnow_add_peer_obj) },
-    { MP_ROM_QSTR(MP_QSTR_mod_peer), MP_ROM_PTR(&espnow_mod_peer_obj) },
-    { MP_ROM_QSTR(MP_QSTR_get_peer), MP_ROM_PTR(&espnow_get_peer_obj) },
     { MP_ROM_QSTR(MP_QSTR_del_peer), MP_ROM_PTR(&espnow_del_peer_obj) },
     { MP_ROM_QSTR(MP_QSTR_get_peers), MP_ROM_PTR(&espnow_get_peers_obj) },
+    #if MICROPY_ESPNOW_EXTRA_PEER_METHODS
+    { MP_ROM_QSTR(MP_QSTR_mod_peer), MP_ROM_PTR(&espnow_mod_peer_obj) },
+    { MP_ROM_QSTR(MP_QSTR_get_peer), MP_ROM_PTR(&espnow_get_peer_obj) },
     { MP_ROM_QSTR(MP_QSTR_peer_count), MP_ROM_PTR(&espnow_peer_count_obj) },
+    #endif // MICROPY_ESPNOW_EXTRA_PEER_METHODS
 };
 STATIC MP_DEFINE_CONST_DICT(esp_espnow_locals_dict, esp_espnow_locals_dict_table);
 
@@ -879,7 +866,6 @@ STATIC const mp_rom_map_elem_t espnow_globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_KEY_LEN), MP_ROM_INT(ESP_NOW_KEY_LEN)},
     { MP_ROM_QSTR(MP_QSTR_MAX_TOTAL_PEER_NUM), MP_ROM_INT(ESP_NOW_MAX_TOTAL_PEER_NUM)},
     { MP_ROM_QSTR(MP_QSTR_MAX_ENCRYPT_PEER_NUM), MP_ROM_INT(ESP_NOW_MAX_ENCRYPT_PEER_NUM)},
-    { MP_ROM_QSTR(MP_QSTR_RECV_DATA), MP_ROM_INT(EVENT_RECV_DATA)},
 };
 STATIC MP_DEFINE_CONST_DICT(espnow_globals_dict, espnow_globals_dict_table);
 
@@ -906,6 +892,7 @@ STATIC const mp_stream_p_t espnow_stream_p = {
     .ioctl = espnow_stream_ioctl,
 };
 
+#if MICROPY_ESPNOW_RSSI
 // Return reference to the dictionary of peers we have seen:
 //   {peer1: (rssi, time_sec), peer2: (rssi, time_msec), ...}
 // where:
@@ -924,12 +911,15 @@ STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
     dest[1] = MP_OBJ_SENTINEL;  // Attribute not found
 }
+#endif // MICROPY_ESPNOW_RSSI
 
 const mp_obj_type_t esp_espnow_type = {
     { &mp_type_type },
     .name = MP_QSTR_ESPNow,
     .make_new = espnow_make_new,
+    #if MICROPY_ESPNOW_RSSI
     .attr = espnow_attr,
+    #endif // MICROPY_ESPNOW_RSSI
     .protocol = &espnow_stream_p,
     .locals_dict = (mp_obj_t)&esp_espnow_locals_dict,
 };

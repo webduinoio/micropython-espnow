@@ -10,27 +10,28 @@ MAX_TOTAL_PEER_NUM = espnow.MAX_TOTAL_PEER_NUM
 MAX_ENCRYPT_PEER_NUM = espnow.MAX_ENCRYPT_PEER_NUM
 
 
-class ESPNowIO(espnow.ESPNow):
-    # Static buffers for alloc free receipt of messages with
-    # ESPNow.irecv().
-    _peer = None  # Storage array for peer is not needed on ESP32
-    _msg = bytearray(MAX_DATA_LEN)
-    _buffers = [_peer, _msg]
+class ESPNow(ESPNow):
+    # Static buffers for alloc free receipt of messages with ESPNow.irecv().
+    _buffers = [None, bytearray(MAX_DATA_LEN)]
+    _none_tuple = (None, None)
 
     def __init__(self):
         super().__init__()
 
-    # Backward compatibility with pre-release API
-    def init(self):
-        self.active(True)
-
-    # Backward compatibility with pre-release API
-    def deinit(self):
-        self.active(False)
-
-    # Convenience API for alloc-free recv()
     def irecv(self, timeout=None):
-        return self.recv(timeout, ESPNowIO._buffers)
+        n = self.recvinto(self._buffers, timeout)
+        return self._buffers if n > 0 else self._none_tuple
+
+    def recv(self, timeout=None):
+        n = self.recvinto(self._buffers, timeout)
+        return [bytes(x) for x in self._buffers] if n else self._none_tuple
+
+    def irq(recv_cb):
+        def cb_wrapper(e):
+            data = e.irecv(0)
+            recv_cb(ESPNOW_EVENT_DATA, data)
+
+        super().irq(cb_wrapper)
 
     def __iter__(self):
         return self
@@ -38,13 +39,19 @@ class ESPNowIO(espnow.ESPNow):
     def __next__(self):
         return self.irecv()  # Use alloc free irecv() method
 
+    # Backward compatibility with pre-release API
+    def init(self, *args):
+        keys = "rxbuf, timeout"
+        kwargs = {keys[i]: args[i] for i in range(len(args))}
+        if kwargs:
+            self.config(**kwargs)
+        self.active(True)
 
-_espnowio = None  # A pseudo-singleton for ESPNowIO.
+    def deinit(self):
+        self.active(False)
+
 
 # Convenience function to support:
 #   import espnowio as espnow; e = espnow.ESPNow()
 def ESPNow():
-    global _espnowio
-    if _espnowio == None:
-        _espnowio = ESPNowIO()
-    return _espnowio
+    return ESPNowIO()

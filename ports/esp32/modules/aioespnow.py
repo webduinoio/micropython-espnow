@@ -1,4 +1,4 @@
-# ESPNowX module for MicroPython on ESP32
+# aioespnow module for MicroPython on ESP32 and ESP8266
 # MIT license; Copyright (c) 2022 Glenn Moloney @glenn20
 
 import uasyncio
@@ -19,11 +19,11 @@ class AIOESPNow(espnowio.ESPNowIO):
         yield uasyncio.core._io_queue.queue_read(self)
         return self.irecv(0)
 
-    async def asend(self, mac, msg=None, sync=None, size=None):
+    async def asend(self, mac, msg=None, sync=None):
         if msg is None:
             msg, mac = mac, None  # If msg is None: swap mac and msg
         yield uasyncio.core._io_queue.queue_write(self)
-        return self.send(mac, msg, sync, size)
+        return self.send(mac, msg, sync)
 
     # async for support
     def __aiter__(self):
