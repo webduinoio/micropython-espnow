@@ -8,7 +8,7 @@ try:
     import random
     import uselect
     import usys
-    import espnowio as espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -82,12 +82,13 @@ def instance0():
 
 # Client
 def instance1():
-    # Instance 1 (the client) must be an ESP32
-    if usys.platform != "esp32":
+    # Instance 1 (the client)
+    e = init(True, False)
+    if not hasattr(e, "peers_table"):
+        e.active(False)
         print("SKIP")
         raise SystemExit
 
-    e = init(True, False)
     e.config(timeout=timeout)
     multitest.next()
     peer = PEERS[0]

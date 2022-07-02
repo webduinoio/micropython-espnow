@@ -3,7 +3,7 @@
 
 try:
     import network
-    from esp import espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -31,6 +31,10 @@ def instance0():
     multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
     multitest.next()
     peer, msg1 = e.recv(5000)
+    if msg1 is None:
+        print("e.recv(5000): Timeout waiting for message.")
+        e.active(False)
+        return
     print(bytes(msg1))
     msg2 = b"server to client"
     e.add_peer(peer)

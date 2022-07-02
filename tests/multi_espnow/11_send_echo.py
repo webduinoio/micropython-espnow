@@ -4,7 +4,7 @@
 try:
     import network
     import random
-    from esp import espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
