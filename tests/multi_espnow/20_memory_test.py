@@ -5,7 +5,7 @@ try:
     import micropython
     import network
     import random
-    import espnowio as espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit

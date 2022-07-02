@@ -6,7 +6,7 @@ try:
     import network
     import random
     import usys
-    import espnowio as espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -118,11 +118,7 @@ try:
 
     # Client
     def instance1():
-        # Instance 1 (the client) must be an ESP32
-        if usys.platform != "esp32":
-            print("SKIP")
-            raise SystemExit
-
+        # Instance 1 (the client)
         asyncio.run(client())
 
 except:

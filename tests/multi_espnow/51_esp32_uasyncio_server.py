@@ -6,7 +6,7 @@ try:
     import network
     import random
     import usys
-    import espnowio as espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
@@ -65,9 +65,6 @@ try:
                 return
 
     def instance0():
-        if usys.platform != "esp32":
-            print("SKIP")
-            raise SystemExit
         e = init(True, False)
         multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
         multitest.next()

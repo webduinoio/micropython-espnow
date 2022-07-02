@@ -19,14 +19,14 @@ try:
     import network
     import random
     import time
-    from esp import espnow
+    import espnow
 except ImportError:
     print("SKIP")
     raise SystemExit
 
 
 # Set read timeout to 5 seconds
-timeout = 1000
+timeout = 5000
 default_pmk = b"Micropyth0nRules"
 default_lmk = b"0123456789abcdef"
 sync = True
