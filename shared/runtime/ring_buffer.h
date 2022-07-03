@@ -62,6 +62,9 @@ RB_STATIC bool buffer_get(buffer_t buffer, void *data, size_t len);
 RB_STATIC bool buffer_recv(
     buffer_t buffer, void *data, size_t len, int timeout_ms);
 
+// Reserve contiguous memory in buffer for incoming data
+RB_STATIC bool buffer_reserve(buffer_t buffer, size_t len);
+
 #if 0
 // Copy data to the buffer - wait if buffer is full up to timeout_ms
 RB_STATIC bool buffer_send(
@@ -77,7 +80,8 @@ RB_STATIC void buffer_print(char *name, const buffer_t buffer);
 // This method needs to maintain one free byte to ensure lock-less thread
 // safety for a single producer and a single consumer.
 struct buffer_real_t {
-    uint16_t size;
+    uint16_t alloc;
+    volatile uint16_t size;
     volatile uint16_t head;
     uint16_t tail;
     uint8_t memory[];
@@ -87,28 +91,28 @@ struct buffer_real_t {
 static inline bool buffer_full(const buffer_t buffer) {
     assert(buffer);
 
-    return (buffer->head + 1) % buffer->size == buffer->tail;
+    return (buffer->head + 1) % buffer->size == (buffer->tail % buffer->size);
 }
 
 // Is the buffer empty?
 static inline bool buffer_empty(const buffer_t buffer) {
     assert(buffer);
 
-    return buffer->head == buffer->tail;
+    return buffer->head == (buffer->tail % buffer->size);
 }
 
 // Total size (capacity) of the buffer
 static inline size_t buffer_size(const buffer_t buffer) {
     assert(buffer);
 
-    return buffer->size - 1;
+    return buffer->alloc - 1;
 }
 
 // Number of bytes available to be read from the buffer
 static inline size_t buffer_used(const buffer_t buffer) {
     assert(buffer);
 
-    int diff = buffer->head - buffer->tail;
+    int diff = buffer->head - (buffer->tail % buffer->size);
     return (diff >= 0)
             ? diff
             : (buffer->size + diff);
@@ -118,7 +122,7 @@ static inline size_t buffer_used(const buffer_t buffer) {
 static inline size_t buffer_free(const buffer_t buffer) {
     assert(buffer);
 
-    int diff = buffer->head - buffer->tail;
+    int diff = buffer->head - (buffer->tail % buffer->size);
     return (diff >= 0)
             ? buffer->size - diff - 1
             : -diff - 1;

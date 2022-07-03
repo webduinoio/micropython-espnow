@@ -584,7 +584,8 @@ STATIC void recv_cb(
 
     esp_espnow_obj_t *self = _get_singleton();
     buffer_t buf = self->recv_buffer;
-    if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
+    //if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
+    if (!buffer_reserve(self->recv_buffer, sizeof(espnow_pkt_t) + msg_len)) {
         self->dropped_rx_pkts++;
         return;
     }
@@ -887,6 +888,71 @@ const mp_obj_type_t esp_espnow_type = {
     .protocol = &espnow_stream_p,
     .locals_dict = (mp_obj_t)&esp_espnow_locals_dict,
 };
+
+#define BUFFER_OBJ 0
+#if BUFFER_OBJ
+const mp_obj_type_t espnow_buffer_type;
+
+typedef struct _espnow_buffer_obj_t {
+    mp_obj_base_t base;
+    buffer_real_t *buffer;
+    mp_obj_array_t *array;
+} espnow_buffer_obj_t;
+
+STATIC void buffer_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
+    espnow_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (dest[0] != MP_OBJ_NULL) {   // Only allow "Load" operation
+        if (attr == MP_QSTR_tail) {
+            int tail = mp_obj_get_int(dest[0]);
+            if (0 <= tail && tail < self->buffer->size) {
+                self->buffer->tail = tail;
+            } else {
+                mp_raise_ValueError(MP_ERROR_TEXT("Tail out of range"));
+            }
+            dest[0] = MP_OBJ_NULL; // indicate success
+        }
+        return;
+    }
+    if (attr == MP_QSTR_size) {
+        dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->size);
+        return;
+    } else if (attr == MP_QSTR_alloc) {
+        dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->alloc);
+        return;
+    } else if (attr == MP_QSTR_head) {
+        dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->head);
+        return;
+    } else if (attr == MP_QSTR_tail) {
+        dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->tail);
+        return;
+    } else if (attr == MP_QSTR_array) {
+        dest[0] = self->array;
+        return;
+    }
+    dest[1] = MP_OBJ_SENTINEL;  // Attribute not found
+}
+
+STATIC mp_obj_t buffer_make_new(
+    const mp_obj_type_t *type, size_t n_args,
+    size_t n_kw, const mp_obj_t *args)
+{
+    size_t size = (n_args > 1) ? mp_obj_get_int(args[0]) : DEFAULT_RECV_BUFFER_SIZE;
+
+    espnow_buffer_obj_t *self = m_new_obj(espnow_buffer_obj_t);
+    self->base.type = &espnow_buffer_type;
+    self->buffer = buffer_init(size);
+    self->array = mp_obj_new_bytearray_by_ref(self->buffer->size, self->buffer->memory);
+}
+
+const mp_obj_type_t espnow_buffer_type = {
+    { &mp_type_type },
+    .name = MP_QSTR_Buffer,
+    .make_new = buffer_make_new,
+    .attr = buffer_attr,
+    .protocol = &buffer_stream_p,
+    .locals_dict = (mp_obj_t)&buffer_locals_dict,
+};
+#endif
 
 const mp_obj_module_t mp_module_espnow = {
     .base = { &mp_type_module },
