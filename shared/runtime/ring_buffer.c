@@ -59,6 +59,7 @@ RB_STATIC buffer_t buffer_init(size_t size) {
     buffer_t buffer = m_malloc0(size + sizeof(buffer_real_t) + 1);
     assert(buffer);
 
+    buffer->alloc = size + 1;
     buffer->size = size + 1;
     #ifdef RING_BUFFER_USE
     buffer->free = 1;
@@ -73,10 +74,27 @@ RB_STATIC buffer_t buffer_init(size_t size) {
 // Release and free the memory buffer
 RB_STATIC void buffer_release(buffer_t buffer) {
     assert(buffer);
-    buffer->size = buffer->head = buffer->tail = 0;
+    buffer->alloc = buffer->size = buffer->head = buffer->tail = 0;
     m_free(buffer);
 }
 #endif
+
+// Reserve space in the buffer.
+RB_STATIC bool buffer_reserve(buffer_t buffer, size_t len) {
+    if (buffer_free(buffer) < len) {
+        return false;
+    }
+    size_t end = (buffer->head + len);
+    if (end > buffer->size) {
+        // truncate the buffer and reset pointers to start of buffer
+        if (buffer->tail < len + 1) {
+            return false;
+        }
+        buffer->size = buffer->head;
+        buffer->head = 0;
+    }
+    return true;
+}
 
 // Copy some data to the buffer - reject if buffer is full
 RB_STATIC bool buffer_put(buffer_t buffer, const void *data, size_t len) {
@@ -89,6 +107,7 @@ RB_STATIC bool buffer_put(buffer_t buffer, const void *data, size_t len) {
     size_t end = (buffer->head + len) % buffer->size;
     const uint8_t *datap = data;
     if (end < buffer->head) {
+        printf("OOPS!!");
         // Copy part of the data into the space left at the end of the buffer
         memcpy(buffer->memory + buffer->head, data, buffer->size - buffer->head);
         datap += (buffer->size - buffer->head);
@@ -108,10 +127,11 @@ static int do_buffer_peek(const buffer_t buffer, void *data, size_t len) {
         return -1;
     }
 
-    int tail = buffer->tail;
+    int tail = (buffer->tail % buffer->size);
     int end = (tail + len) % buffer->size;
     uint8_t *datap = data;
     if (end < tail) {
+        printf("OOPS!!");
         // Copy part of the data from the space left at the end of the buffer
         memcpy(data, buffer->memory + tail, buffer->size - tail);
         datap += (buffer->size - tail);
@@ -128,6 +148,10 @@ RB_STATIC bool buffer_get(buffer_t buffer, void *data, size_t len) {
     if (end < 0) {
         return false;
     }
+    if (buffer->tail >= buffer->size) {
+        // We are wrapping around the buffer, reset in case was truncated
+        buffer->size = buffer->alloc;
+    }
     buffer->tail = end;
     return true;
 }
@@ -137,7 +161,7 @@ RB_STATIC bool buffer_get(buffer_t buffer, void *data, size_t len) {
 RB_STATIC void buffer_print(char *name, const buffer_t buffer) {
     printf("%s: alloc=%3d size=%3d head=%3d, tail=%3d, used=%3d, free=%3d, start=%p\n",
         name,
-        (int)buffer->size + sizeof(buffer_real_t),
+        (int)buffer->alloc,
         (int)buffer->size, (int)buffer->head, (int)buffer->tail,
         (int)buffer_used(buffer), (int)buffer_free(buffer), buffer->memory
         );
