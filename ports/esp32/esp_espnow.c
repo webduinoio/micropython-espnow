@@ -316,44 +316,17 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_stats_obj, espnow_stats);
 // - support monitoring the RSSI values for all peers; and
 // - to return unique bytestrings for each peer which supports more efficient
 //   application memory usage and peer handling.
-// - In future we can also efficiently support recv buffers for each host.
 
 // Get the RSSI value from the wifi packet header
 static inline int8_t _get_rssi_from_wifi_pkt(const uint8_t *msg) {
-    // This struct is solely to support backtracking to get the rssi of msgs
-    // See espnow.c:espnow_recv_cb() at https://github.com/espressif/esp-now/
-    // All we actually use is sizeof(espnow_frame_format_t).
-    // Could be replaced with:
-    //   static const size_t sizeof_espnow_frame = 39;
-    typedef struct
-    {
-        uint16_t frame_head;
-        uint16_t duration;
-        uint8_t destination_address[6];
-        uint8_t source_address[6];
-        uint8_t broadcast_address[6];
-        uint16_t sequence_control;
-
-        uint8_t category_code;
-        uint8_t organization_identifier[3]; // 0x18fe34
-        uint8_t random_values[4];
-        struct {
-            uint8_t element_id;                 // 0xdd
-            uint8_t lenght;                     //
-            uint8_t organization_identifier[3]; // 0x18fe34
-            uint8_t type;                       // 4
-            uint8_t version;
-            uint8_t body[0];
-        } vendor_specific_content;
-    } __attribute__((packed)) espnow_frame_format_t;
-
     // Warning: Secret magic to get the rssi from the wifi packet header
     // See espnow.c:espnow_recv_cb() at https://github.com/espressif/esp-now/
     // In the wifi packet the msg comes after a wifi_promiscuous_pkt_t
     // and a espnow_frame_format_t.
     // Backtrack to get a pointer to the wifi_promiscuous_pkt_t.
+    static const size_t sizeof_espnow_frame_format = 39;
     wifi_promiscuous_pkt_t *wifi_pkt = (wifi_promiscuous_pkt_t *)(
-        msg - sizeof(espnow_frame_format_t) - sizeof(wifi_promiscuous_pkt_t));
+        msg - sizeof_espnow_frame_format - sizeof(wifi_promiscuous_pkt_t));
 
     #if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(4, 2, 0)
     return wifi_pkt->rx_ctrl.rssi - 100;  // Offset rssi for IDF 4.0.2
@@ -371,22 +344,14 @@ static mp_map_elem_t *_lookup_add_peer(
     // We do not want to allocate any new memory in the case that the peer
     // already exists in the peers_table (which is almost all the time).
     // So, we use a byte string on the stack and look that up in the dict.
-    // Warning - depends on internal representation of mp_obj_str_t.
-    mp_obj_str_t peer_obj = {  // A byte string on the stack holding peer addr
-        .base = {&mp_type_bytes},
-        .hash = qstr_compute_hash(peer, ESP_NOW_ETH_ALEN),
-        .len = ESP_NOW_ETH_ALEN,
-        .data = peer, // Points to memory on the stack
-    };
     mp_map_t *map = mp_obj_dict_get_map(self->peers_table);
-    // First lookup the peer without allocating new memory
+    mp_obj_str_t peer_obj = {{&mp_type_bytes}, 0, ESP_NOW_ETH_ALEN, peer};
     mp_map_elem_t *item = mp_map_lookup(map, &peer_obj, MP_MAP_LOOKUP);
     if (item == NULL) {
         // If not found, add the peer using a new bytestring
         map->is_fixed = 0;      // Allow to modify the dict
-        item = mp_map_lookup(map,
-            mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN),
-            MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+        mp_obj_t new_peer = mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN);
+        item = mp_map_lookup(map, new_peer, MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
         map->is_fixed = 1;      // Relock the dict
     }
     return item;
@@ -407,10 +372,6 @@ static mp_map_elem_t *_update_rssi(
             (mp_obj_t [2]) {mp_const_none, mp_const_none});
         list = MP_OBJ_TO_PTR(item->value);
     }
-
-    // Update the values
-    // item->key = peer MAC Address (byte string)
-    // item->value = [rssi, timestamp_ms]
     list->items[0] = MP_OBJ_NEW_SMALL_INT(rssi);
     list->items[1] = mp_obj_new_int(time_ms);
     return item;
@@ -859,7 +820,7 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
 STATIC MP_DEFINE_CONST_DICT(esp_espnow_locals_dict, esp_espnow_locals_dict_table);
 
 STATIC const mp_rom_map_elem_t espnow_globals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_espnow) },
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__espnow) },
     { MP_ROM_QSTR(MP_QSTR_ESPNow), MP_ROM_PTR(&esp_espnow_type) },
     { MP_ROM_QSTR(MP_QSTR_MAX_DATA_LEN), MP_ROM_INT(ESP_NOW_MAX_DATA_LEN)},
     { MP_ROM_QSTR(MP_QSTR_ETH_ALEN), MP_ROM_INT(ESP_NOW_ETH_ALEN)},
@@ -924,7 +885,9 @@ const mp_obj_type_t esp_espnow_type = {
     .locals_dict = (mp_obj_t)&esp_espnow_locals_dict,
 };
 
-const mp_obj_module_t mp_module_esp_espnow = {
+const mp_obj_module_t mp_module_espnow = {
     .base = { &mp_type_module },
     .globals = (mp_obj_dict_t *)&espnow_globals_dict,
 };
+
+MP_REGISTER_MODULE(MP_QSTR__espnow, mp_module_espnow);

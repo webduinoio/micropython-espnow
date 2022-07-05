@@ -327,9 +327,6 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
         size_t size = msg->len + msg->free;
         msg->len = msg_len;
         msg->free = size - msg_len;
-    } else if (mp_obj_is_type(msg, &mp_type_memoryview) &&
-               mp_binary_get_size('@', msg->typecode, NULL) == sizeof(char)) {
-        msg->len = msg_len;
     }
 
     return MP_OBJ_NEW_SMALL_INT(msg_len);
@@ -453,8 +450,13 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
 STATIC MP_DEFINE_CONST_DICT(esp_espnow_locals_dict, esp_espnow_locals_dict_table);
 
 STATIC const mp_rom_map_elem_t espnow_globals_dict_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_espnow) },
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__espnow) },
     { MP_ROM_QSTR(MP_QSTR_ESPNow), MP_ROM_PTR(&esp_espnow_type) },
+    { MP_ROM_QSTR(MP_QSTR_MAX_DATA_LEN), MP_ROM_INT(ESP_NOW_MAX_DATA_LEN)},
+    { MP_ROM_QSTR(MP_QSTR_ETH_ALEN), MP_ROM_INT(ESP_NOW_ETH_ALEN)},
+    { MP_ROM_QSTR(MP_QSTR_KEY_LEN), MP_ROM_INT(ESP_NOW_KEY_LEN)},
+    { MP_ROM_QSTR(MP_QSTR_MAX_TOTAL_PEER_NUM), MP_ROM_INT(ESP_NOW_MAX_TOTAL_PEER_NUM)},
+    { MP_ROM_QSTR(MP_QSTR_MAX_ENCRYPT_PEER_NUM), MP_ROM_INT(ESP_NOW_MAX_ENCRYPT_PEER_NUM)},
 };
 STATIC MP_DEFINE_CONST_DICT(espnow_globals_dict, espnow_globals_dict_table);
 
@@ -485,9 +487,11 @@ const mp_obj_type_t esp_espnow_type = {
     .locals_dict = (mp_obj_t)&esp_espnow_locals_dict,
 };
 
-const mp_obj_module_t mp_module_esp_espnow = {
+const mp_obj_module_t mp_module_espnow = {
     .base = { &mp_type_module },
     .globals = (mp_obj_dict_t *)&espnow_globals_dict,
 };
+
+MP_REGISTER_MODULE(MP_QSTR__espnow, mp_module_espnow);
 
 #endif
