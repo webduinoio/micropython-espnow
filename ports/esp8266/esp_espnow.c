@@ -458,10 +458,30 @@ STATIC const mp_rom_map_elem_t espnow_globals_dict_table[] = {
 };
 STATIC MP_DEFINE_CONST_DICT(espnow_globals_dict, espnow_globals_dict_table);
 
+// ### Dummy Buffer Protocol support
+// ...so asyncio can poll.ipoll() on this device
+
+// Support ioctl(MP_STREAM_POLL, ) for asyncio
+STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
+    uintptr_t arg, int *errcode) {
+    if (request != MP_STREAM_POLL) {
+        *errcode = MP_EINVAL;
+        return MP_STREAM_ERROR;
+    }
+    esp_espnow_obj_t *self = _get_singleton();
+    return (self->recv_buffer == NULL) ? 0 :  // If not initialised
+           arg ^ (buffer_empty(self->recv_buffer) ? MP_STREAM_POLL_RD : 0);
+}
+
+STATIC const mp_stream_p_t espnow_stream_p = {
+    .ioctl = espnow_stream_ioctl,
+};
+
 const mp_obj_type_t esp_espnow_type = {
     { &mp_type_type },
     .name = MP_QSTR_ESPNow,
     .make_new = espnow_make_new,
+    .protocol = &espnow_stream_p,
     .locals_dict = (mp_obj_t)&esp_espnow_locals_dict,
 };
 

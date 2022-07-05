@@ -21,7 +21,6 @@ class ESPNow(ESPNow):
         self._poll = poll()  # For any() method below...
         self._poll.register(self, POLLIN)
 
-    # Convenience API for alloc-free recv()
     def irecv(self, timeout=None):
         n = self.recvinto(self._buffers, timeout)
         return self._buffers if n > 0 else self._none_tuple
