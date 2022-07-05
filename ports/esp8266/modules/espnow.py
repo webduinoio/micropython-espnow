@@ -1,19 +1,13 @@
-# espnowio module for MicroPython on ESP8266
+# espnow module for MicroPython on ESP8266
 # MIT license; Copyright (c) 2022 Glenn Moloney @glenn20
 
 from _espnow import *
 from uselect import poll, POLLIN
 
-ETH_ALEN = const(6)
-MAX_DATA_LEN = const(250)
-KEY_LEN = const(16)
-MAX_TOTAL_PEER_NUM = const(20)
-MAX_ENCRYPT_PEER_NUM = const(6)
 
 class ESPNow(ESPNow):
-    # Static buffers for alloc free receipt of messages with
-    # ESPNow.irecv().
-    _buffers = [bytearray(ETH_ALEN), bytearray(MAX_DATA_LEN)]
+    # Static buffers for alloc free receipt of messages with ESPNow.irecv().
+    _data = [bytearray(ETH_ALEN), bytearray(MAX_DATA_LEN)]
     _none_tuple = (None, None)
 
     def __init__(self):
@@ -22,12 +16,12 @@ class ESPNow(ESPNow):
         self._poll.register(self, POLLIN)
 
     def irecv(self, timeout=None):
-        n = self.recvinto(self._buffers, timeout)
-        return self._buffers if n > 0 else self._none_tuple
+        n = self.recvinto(self._data, timeout)
+        return self._data if n else self._none_tuple
 
     def recv(self, timeout=None):
-        n = self.recvinto(self._buffers, timeout)
-        return [bytes(x) for x in self._buffers] if n else self._none_tuple
+        n = self.recvinto(self._data, timeout)
+        return [bytes(x) for x in self._data] if n else self._none_tuple
 
     def __iter__(self):
         return self
@@ -43,15 +37,8 @@ class ESPNow(ESPNow):
             return False
 
     # Backward compatibility with pre-release API
-    def init(self, *args):
-        keys = "rxbuf, timeout"
-        kwargs = {keys[i]: args[i] for i in range(len(args))}
-        if kwargs:
-            self.config(**kwargs)
+    def init(self):
         self.active(True)
 
     def deinit(self):
         self.active(False)
-
-def ESPNow():
-    return ESPNowIO()

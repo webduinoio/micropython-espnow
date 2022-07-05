@@ -2,11 +2,11 @@
 # MIT license; Copyright (c) 2022 Glenn Moloney @glenn20
 
 import uasyncio
-import espnowio
+import espnow
 
 # Modelled on the uasyncio.Stream class (extmod/stream/stream.py)
 # NOTE: Relies on internal implementation of uasyncio.core (_io_queue)
-class AIOESPNow(espnowio.ESPNowIO):
+class AIOESPNow(espnow.ESPNow):
     def __init__(self, e=None):
         super().__init__()
 
