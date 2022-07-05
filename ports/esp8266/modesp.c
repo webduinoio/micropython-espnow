@@ -375,10 +375,6 @@ STATIC const mp_rom_map_elem_t esp_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_SLEEP_LIGHT), MP_ROM_INT(LIGHT_SLEEP_T) },
     { MP_ROM_QSTR(MP_QSTR_SLEEP_MODEM), MP_ROM_INT(MODEM_SLEEP_T) },
     #endif
-
-    #if MICROPY_ESPNOW
-    { MP_ROM_QSTR(MP_QSTR_espnow), MP_ROM_PTR(&mp_module_esp_espnow) },
-    #endif
 };
 
 STATIC MP_DEFINE_CONST_DICT(esp_module_globals, esp_module_globals_table);
