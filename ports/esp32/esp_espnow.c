@@ -115,6 +115,7 @@ typedef struct _esp_espnow_obj_t {
     volatile size_t tx_failures;    // # of sent packet responses failed
     size_t peer_count;              // Cache the # of peers for send(sync=True)
     mp_obj_t recv_cb;               // Callback when a packet is received
+    mp_obj_t recv_cb_arg;           // Argument passed to callback
     #if MICROPY_ESPNOW_RSSI
     mp_obj_t peers_table;           // A dictionary of discovered peers
     #endif // MICROPY_ESPNOW_RSSI
@@ -283,17 +284,19 @@ STATIC mp_obj_t espnow_config(
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_config_obj, 1, espnow_config);
 
-// ESPNow.irq(recv_cb)
+// ESPNow.on_recv(recv_cb)
 // Set callback function to be invoked when a message is received.
-STATIC mp_obj_t espnow_irq(mp_obj_t _, mp_obj_t recv_cb) {
+STATIC mp_obj_t espnow_on_recv(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton();
+    mp_obj_t recv_cb = args[1];
     if (recv_cb != mp_const_none && !mp_obj_is_callable(recv_cb)) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid handler"));
     }
     self->recv_cb = recv_cb;
+    self->recv_cb_arg = (n_args > 2) ? args[2] : mp_const_none;
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_irq_obj, espnow_irq);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_on_recv_obj, 2, 3, espnow_on_recv);
 
 // ESPnow.stats(): Provide some useful stats.
 // Returns a tuple of:
@@ -598,7 +601,7 @@ STATIC void recv_cb(
     buffer_put(buf, msg, msg_len);
     self->rx_packets++;
     if (self->recv_cb != mp_const_none) {
-        mp_sched_schedule(self->recv_cb, self);
+        mp_sched_schedule(self->recv_cb, self->recv_cb_arg);
     }
 }
 
@@ -798,7 +801,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
 STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&espnow_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&espnow_config_obj) },
-    { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&espnow_irq_obj) },
+    { MP_ROM_QSTR(MP_QSTR_on_recv), MP_ROM_PTR(&espnow_on_recv_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&espnow_stats_obj) },
 
     // Send and receive messages
