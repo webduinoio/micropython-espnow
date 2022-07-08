@@ -16,6 +16,7 @@ Table of Contents:
     - `Configuration`_
     - `Sending and Receiving Data`_
     - `Peer Management`_
+    - `Callback Methods`_
     - `Exceptions`_
     - `Constants`_
     - `Wifi Signal Strength (RSSI) - (ESP32 Only)`_
@@ -386,30 +387,6 @@ receiving ESP-NOW messages. You can avoid this by calling
     **Note**: Dropped packets will still be acknowledged to the sender as
     received.
 
-.. method:: ESPNow.irq(recv_cb) (ESP32 only)
-
-  Set a callback function to be called *as soon as possible* after a
-  message has been received from another ESPNow device. The function will be
-  called with the ESPNow object as an argument:
-
-  .. data:: Returns:
-
-      ``None``
-
-  The `ESPNow.irq()` callback method is an alternative method for processing
-  incoming espnow messages, especially if the data rate is moderate and the
-  device is *not too busy* but there are some caveats:
-
-  - The scheduler stack *can* easily overflow and callbacks will be missed if
-    packets are arriving at a sufficient rate or if other micropython components
-    (eg, bluetooth, machine.Pin.irq(), machine.timer, i2s, ...) are exercising
-    the scheduler stack. This method may be less reliable for dealing with
-    bursts of messages, or high throughput or on a device which is busy dealing
-    with other hardware operations.
-
-  - For more information on *scheduled* function callbacks see:
-    `micropython.schedule()<micropython.schedule>`.
-
 Peer Management
 ---------------
 
@@ -547,6 +524,51 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     address. Parameters may be provided as positional or keyword arguments
     (see `ESPNow.add_peer()`).
 
+Callback Methods
+----------------
+
+.. method:: ESPNow.on_recv(recv_cb[, arg=None]) (ESP32 only)
+
+  Set a callback function to be called *as soon as possible* after a message has
+  been received from another ESPNow device. The function will be called with
+  ``arg`` as an argument, eg: ::
+
+          def recv_cb(e):
+              print(e.irecv(0))
+          e.on_recv(recv_cb, e)
+
+.. method:: ESPNow.irq(irq_cb) (ESP32 only)
+
+  Set a callback function to be called *as soon as possible* after a message has
+  been received from another ESPNow device. The function will be called with
+  `espnow.EVENT_RECV_MSG` as the first argument and a list of the peer and
+  received message as the second argument, eg: ::
+
+          def irq_cb(code, data):
+              if code == espnow.EVENT_RECV_MSG:
+                  peer, msg = data
+                  print(peer, msg)
+          e.irq(irq_cb)
+
+  **Note:** `irq()<ESPNow.irq()>` and `on_recv()<ESPNow.on_recv()>` will each
+  replace the current callback function, so only one of these methods will be
+  active at any given time.
+
+  The `on_recv()<ESPNow.on_recv()>` and `irq()<ESPNow.irq()>` callback methods
+  are an alternative method for processing incoming espnow messages, especially
+  if the data rate is moderate and the device is *not too busy* but there are
+  some caveats:
+
+  - The scheduler stack *can* easily overflow and callbacks will be missed if
+    packets are arriving at a sufficient rate or if other micropython components
+    (eg, bluetooth, machine.Pin.irq(), machine.timer, i2s, ...) are exercising
+    the scheduler stack. This method may be less reliable for dealing with
+    bursts of messages, or high throughput or on a device which is busy dealing
+    with other hardware operations.
+
+  - For more information on *scheduled* function callbacks see:
+    `micropython.schedule()<micropython.schedule>`.
+
 Constants
 ---------
 
@@ -555,6 +577,7 @@ Constants
           espnow.ETH_ALEN(=6)
           espnow.MAX_TOTAL_PEER_NUM(=20)
           espnow.MAX_ENCRYPT_PEER_NUM(=6)
+          espnow.EVENT_RECV_MSG(=1)
 
 Exceptions
 ----------
@@ -584,7 +607,7 @@ api-reference/network/esp_now.html#api-reference>`_. For example::
 Wifi Signal Strength (RSSI) - (ESP32 only)
 ------------------------------------------
 
-The ESPnow module maintains a **peer device table** which contains the signal
+The ESPNow object maintains a **peer device table** which contains the signal
 strength of the last received message for all known peers. The **peer device
 table** can be accessed using `ESPNow.peers_table` and can be used to track
 device proximity and identify *nearest neighbours* in a network of peer
@@ -623,8 +646,9 @@ Supporting asyncio
 A supplementary module (`aioespnow`) is available to provide
 :doc:`uasyncio<uasyncio>` support.
 
-**Note:** Asyncio support is available on all ESP32 targets and the ESP8266
-GENERIC target (ie. ESP8266 devices with at least 2MB flash memory).
+**Note:** Asyncio support is available on all ESP32 targets as well as those
+ESP8266 boards which include the uasyncio module (ie. ESP8266 devices with at
+least 2MB flash memory).
 
 A small async server example::
 
@@ -690,47 +714,32 @@ A small async server example::
 
     Asyncio support for `ESPNow.send()`.
 
-**Snippet:** Use `AIOESPNow` as stand-in for `ESPNow<espnow.ESPNow>`::
+.. method:: __aiter__()/async __anext__()
 
-    from aioespnow import AIOESPNow
-    import uasyncio as asyncio
+    `AIOESPNow` also supports reading incoming messages by asynchronous
+    iteration using ``async for``; eg::
 
-    e = AIOESPNow()    # An ESPNow object extended with async support
-
-    e.active(True)
-    peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'
-    e.add_peer(peer)
-
-    asyncio.run(e.airecv())
+      e = AIOESPNow()
+      e.active(True)
+      async def recv_till_halt(e):
+          async for mac, msg in e:
+              print(mac, msg)
+              if msg == b'halt':
+                break
+      asyncio.run(recv_till_halt(e))
 
 .. function:: ESPNow()
 
     Return an `AIOESPNow` object. This is a convenience function for adding
-    async support to existing non-async code.
+    async support to existing non-async code, eg: ::
 
-**Snippet:** Transition from existing non-async code::
+      import network
+      # import espnow
+      import aioespnow as espnow
 
-    import network
-    # import espnow
-    import aioespnow as espnow
-
-    e = espnow.ESPNow()  # Returns an AIOESPNow object
-    e.active(True)
-    ...
-
-`AIOESPNow` also supports reading incoming messages by asynchronous
-iteration using ``async for``, eg::
-
-    e = AIOESPNow()
-    e.active(True)
-
-    async def recv_till_halt(e):
-        async for mac, msg in e:
-            print(mac, msg)
-            if msg == b'halt':
-              break
-
-    asyncio.run(recv_till_halt(e))
+      e = espnow.ESPNow()  # Returns an AIOESPNow object
+      e.active(True)
+      ...
 
 Broadcast and Multicast
 -----------------------
