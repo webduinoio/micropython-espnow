@@ -80,6 +80,13 @@ def instance1():
     peer = PEERS[0]
     e.add_peer(peer)
 
+    print("RECVINTO() test...")
+    msg = bytes([random.getrandbits(8) for _ in range(12)])
+    client_send(e, peer, msg, True)
+    data = [bytearray(espnow.ETH_ALEN), bytearray(espnow.MAX_DATA_LEN)]
+    n = e.recvinto(data)
+    print("OK" if data[1] == msg else "ERROR: Received != Sent")
+
     print("IRECV() test...")
     msg = bytes([random.getrandbits(8) for _ in range(12)])
     client_send(e, peer, msg, True)
