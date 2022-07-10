@@ -239,7 +239,7 @@ STATIC mp_obj_t espnow_config(
     esp_espnow_obj_t *self = _get_singleton();
     enum { ARG_get, ARG_buffer, ARG_timeout, ARG_rate };
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_get, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_buffer, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
