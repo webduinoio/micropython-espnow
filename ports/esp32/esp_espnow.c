@@ -239,7 +239,7 @@ STATIC mp_obj_t espnow_config(
     esp_espnow_obj_t *self = _get_singleton();
     enum { ARG_get, ARG_buffer, ARG_timeout, ARG_rate };
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_get, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+        { MP_QSTR_, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_buffer, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
@@ -627,15 +627,15 @@ STATIC bool _update_peer_info(
 
     enum { ARG_lmk, ARG_channel, ARG_ifidx, ARG_encrypt };
     static const mp_arg_t allowed_args[] = {
-        { MP_QSTR_lmk, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
-        { MP_QSTR_channel, MP_ARG_INT, {.u_int = -1} },
-        { MP_QSTR_ifidx, MP_ARG_INT, {.u_int = -1} },
-        { MP_QSTR_encrypt, MP_ARG_BOOL, {.u_bool = MP_OBJ_NULL} },
+        { MP_QSTR_lmk, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_channel, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_ifidx, MP_ARG_OBJ, {.u_obj = mp_const_none} },
+        { MP_QSTR_encrypt, MP_ARG_OBJ, {.u_obj = mp_const_none} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args, pos_args, kw_args,
         MP_ARRAY_SIZE(allowed_args), allowed_args, args);
-    if (args[ARG_lmk].u_obj != MP_OBJ_NULL) {
+    if (args[ARG_lmk].u_obj != mp_const_none) {
         mp_obj_t obj = args[ARG_lmk].u_obj;
         peer->encrypt = mp_obj_is_true(obj);
         if (peer->encrypt) {
@@ -645,14 +645,14 @@ STATIC bool _update_peer_info(
                 ESP_NOW_KEY_LEN);
         }
     }
-    if (args[ARG_channel].u_int != -1) {
-        peer->channel = args[ARG_channel].u_int;
+    if (args[ARG_channel].u_obj != mp_const_none) {
+        peer->channel = mp_obj_get_int(args[ARG_channel].u_obj);
     }
-    if (args[ARG_ifidx].u_int != -1) {
-        peer->ifidx = args[ARG_ifidx].u_int;
+    if (args[ARG_ifidx].u_obj != mp_const_none) {
+        peer->ifidx = mp_obj_get_int(args[ARG_ifidx].u_obj);
     }
-    if (args[ARG_encrypt].u_obj != MP_OBJ_NULL) {
-        peer->encrypt = args[ARG_encrypt].u_bool;
+    if (args[ARG_encrypt].u_obj != mp_const_none) {
+        peer->encrypt = mp_obj_is_true(args[ARG_encrypt].u_obj);
     }
     return true;
 }
