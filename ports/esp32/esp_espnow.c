@@ -44,6 +44,7 @@
 #include "py/objarray.h"
 #include "py/stream.h"
 #include "py/binary.h"
+#include "py/smallint.h"
 
 #include "mpconfigport.h"
 #include "mphalport.h"
@@ -584,7 +585,7 @@ STATIC void recv_cb(
 
     esp_espnow_obj_t *self = _get_singleton();
     buffer_t buf = self->recv_buffer;
-    //if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
+    // if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
     if (!buffer_reserve(self->recv_buffer, sizeof(espnow_pkt_t) + msg_len)) {
         self->dropped_rx_pkts++;
         return;
@@ -870,9 +871,9 @@ typedef struct _espnow_buffer_obj_t {
 STATIC void buffer_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     espnow_buffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
     if (dest[0] == MP_OBJ_NULL) {  // "Load" operation
-        if (attr == MP_QSTR_size) {
+        if (attr == MP_QSTR_end) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->size);
-        } else if (attr == MP_QSTR_alloc) {
+        } else if (attr == MP_QSTR_size) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->alloc);
         } else if (attr == MP_QSTR_head) {
             dest[0] = MP_OBJ_NEW_SMALL_INT(self->buffer->head);
@@ -896,16 +897,110 @@ STATIC void buffer_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
 }
 
+// #define is_signed(typecode) (typecode > 'Z')
+// static void buffer_get_val(
+//     mp_obj_t *obj, char struct_type, char val_type, byte *p_end, byte **ptr) {
+
+//     byte *p = *ptr;
+//     size_t size = mp_binary_get_size(struct_type, val_type, NULL);
+//     if (p + size > p_end) {
+//         mp_raise_ValueError(MP_ERROR_TEXT("buffer out of data"));
+//     }
+//     *ptr = p + size;
+
+//     long long val = mp_binary_get_int(size, is_signed(val_type), (struct_type == '>'), p);
+
+//     if (val_type == 'f') {
+//         union { uint32_t i; float f; } fpu = {val};
+//         return mp_obj_new_float_from_f(fpu.f);  // Allocs new memory
+//     } else if (val_type == 'd') {
+//         union { uint64_t i; double f; } fpu = {val};
+//         return mp_obj_new_float_from_d(fpu.f);  // Allocs new memory
+//     } else if (is_signed(val_type)) {
+//         if (val < (long long)MP_SMALL_INT_MIN || (long long)MP_SMALL_INT_MAX < val) {
+//             mp_raise_ValueError(MP_ERROR_TEXT("small integer overflow"));
+//         }
+//         *obj = MP_OBJ_NEW_SMALL_INT((mp_int_t)val);
+//     } else {
+//         mp_uint_t value = val;
+//         if ((unsigned long long)val > (unsigned long long)MP_SMALL_INT_MAX) {
+//             mp_raise_ValueError(MP_ERROR_TEXT("small integer overflow"));
+//         }
+//         *obj = MP_OBJ_NEW_SMALL_INT(value);
+//     }
+// }
+
+STATIC mp_obj_t buffer_unpack_into(size_t n_args, const mp_obj_t *args) {
+
+    espnow_buffer_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    const char *fmt = mp_obj_str_get_str(args[1]);
+    size_t len = mp_obj_get_int(args[2]);
+    mp_obj_list_t *res = MP_OBJ_TO_PTR(args[3]);
+
+    char fmt_type = '=';
+    char *s = strchr("==<<>>!>@=", *fmt);
+    if (s != NULL) {
+        fmt_type = *++s;
+        fmt++;
+    }
+    byte *p = self->buffer->memory + self->buffer->tail;
+    byte *end_p = self->buffer->memory + self->buffer->size;
+
+    mp_obj_t *items = res->items;
+    for (size_t i = 0; i < res->len;) {
+        mp_uint_t cnt = 0;
+        char c = *fmt;
+        while ('0' <= c && c <= '9') {
+            cnt = cnt * 10 + (c - '0');
+            c = *++fmt;
+        }
+        cnt = (cnt == 0) ? 1 : cnt;
+        if (c == '\0') {
+            break;
+            if (p + cnt * mp_binary_get_size(fmt_type, *fmt, NULL) > end_p) {
+                mp_raise_ValueError(MP_ERROR_TEXT("buffer out of data"));
+            }
+        } else if (c == 's') {
+            if (items[i] == mp_const_none) {
+                items[i] = mp_obj_new_bytearray_by_ref(cnt, p);
+            } else if (mp_obj_is_type(items[i], &mp_type_bytearray)) {
+                mp_obj_array_t *buf = MP_OBJ_TO_PTR(items[i]);
+                buf->items = p;
+                buf->len = cnt;
+                buf->free = 0;
+            } else {
+                mp_raise_TypeError(MP_ERROR_TEXT("expected bytearray"));
+            }
+            p += cnt;
+            i++;
+        } else {
+            while (cnt--) {
+                items[i++] = mp_binary_get_val(fmt_type, *fmt, end_p, &p);
+            }
+        }
+        fmt++;
+    }
+    return MP_OBJ_FROM_PTR(res);
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(
+    buffer_unpack_into_obj, 4, 4, buffer_unpack_into);
+
+STATIC const mp_rom_map_elem_t buffer_locals_dict_table[] = {
+    { MP_ROM_QSTR(MP_QSTR_unpack_into), MP_ROM_PTR(&buffer_unpack_into_obj) },
+};
+STATIC MP_DEFINE_CONST_DICT(buffer_locals_dict, buffer_locals_dict_table);
+
 STATIC mp_obj_t buffer_make_new(
     const mp_obj_type_t *type, size_t n_args,
-    size_t n_kw, const mp_obj_t *args)
-{
-    size_t size = (n_args > 1) ? mp_obj_get_int(args[0]) : DEFAULT_RECV_BUFFER_SIZE;
+    size_t n_kw, const mp_obj_t *args) {
+    size_t size = (n_args > 1)
+        ? mp_obj_get_int(args[0]) : DEFAULT_RECV_BUFFER_SIZE;
 
     espnow_buffer_obj_t *self = m_new_obj(espnow_buffer_obj_t);
     self->base.type = &espnow_buffer_type;
     self->buffer = buffer_init(size);
-    self->array = mp_obj_new_bytearray_by_ref(self->buffer->size, self->buffer->memory);
+    self->array = mp_obj_new_bytearray_by_ref(
+        self->buffer->size, self->buffer->memory);
     return MP_OBJ_FROM_PTR(self);
 }
 
@@ -915,7 +1010,7 @@ const mp_obj_type_t espnow_buffer_type = {
     .make_new = buffer_make_new,
     .attr = buffer_attr,
     // .protocol = &buffer_stream_p,
-    // .locals_dict = (mp_obj_t)&buffer_locals_dict,
+    .locals_dict = (mp_obj_t)&buffer_locals_dict,
 };
 #endif
 
@@ -935,22 +1030,20 @@ STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     if (attr == MP_QSTR_peers_table) {
         dest[0] = self->peers_table;
         return;
-    #if BUFFER_OBJ
+        #if BUFFER_OBJ
     } else if (attr == MP_QSTR_buffer) {
-        static espnow_buffer_obj_t *buffer = NULL;
-        if (buffer == NULL) {
-            if (self->recv_buffer == NULL) {
-                dest[0] = mp_const_none;
-                return;
-            }
-            buffer = m_new_obj(espnow_buffer_obj_t);
-            buffer->base.type = &espnow_buffer_type;
-            buffer->buffer = self->recv_buffer;
-            buffer->array = mp_obj_new_bytearray_by_ref(buffer->buffer->size, buffer->buffer->memory);
+        if (self->recv_buffer == NULL) {
+            dest[0] = mp_const_none;
+            return;
         }
+        espnow_buffer_obj_t *buffer = m_new_obj(espnow_buffer_obj_t);
+        buffer->base.type = &espnow_buffer_type;
+        buffer->buffer = self->recv_buffer;
+        buffer->array = mp_obj_new_bytearray_by_ref(buffer->buffer->size, buffer->buffer->memory);
+
         dest[0] = MP_OBJ_FROM_PTR(buffer);
         return;
-    #endif
+        #endif
     }
     dest[1] = MP_OBJ_SENTINEL;  // Attribute not found
 }
