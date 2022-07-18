@@ -771,104 +771,85 @@ peer. For example::
 ESPNow and Wifi Operation
 -------------------------
 
-The ESP32/8266 devices have two **apparently** independent wifi interfaces
-(``STA_IF`` and ``AP_IF``) and each has their own MAC address. ESPNow messages
-may be sent and received on any `active()<network.WLAN.active>`
-`WLAN<network.WLAN()>` interface (``network.STA_IF`` or ``network.AP_IF``),
-even if that interface is also connected to a wifi network or configured as an
-access point.
+ESPNow messages may be sent and received on any `active()<network.WLAN.active>`
+`WLAN<network.WLAN()>` interface (``network.STA_IF`` or ``network.AP_IF``), even
+if that interface is also connected to a wifi network or configured as an access
+point. When an ESP32 or ESP8266 device connects to a Wifi Access Point (see
+`ESP32 Quickref <../esp32/quickref.html#networking>`__) the following things
+happen which affect ESPNow communications:
 
-Managing peers can become complex if you are using more than just the STA_IF
-interface. You must:
+1. Power saving mode (``ps_mode=WIFI_PS_MIN_MODEM``) is automatically activated;
+   and
+2. The radio on the esp device changes wifi ``channel`` to match the channel
+   used by the Access Point.
 
-- choose the correct MAC address of the remote peer (STA_IF or AP_IF) to
-  register with `add_peer()`,
-- register it with the correct local interface (``ifidx`` = STA_IF or AP_IF),
-  and
-- ensure the correct interfaces are ``active(True)`` on the local and remote
-  peer.
-
-`ESPNow.send()<ESPNow.send()>` will raise an
-``OSError('ESP_ERR_ESPNOW_IF')``
-exception when trying to send a message to a peer which is registered to a
-local interface which is not ``active(True)``. Note also that both
-interfaces may be active simultaneously, leading to a lot of flexibility
-in configuring ESPNow and Wifi networks.
-
-Sending ESPNow packets to a STA_IF interface which is also connected to a wifi
-access point (AP) can be unreliable due to the default power saving mode
-(WIFI_PS_MIN_MODEM) of the ESP32 when connected to an external Access Point.
-
-There are several options to improve reliability of receiving ESPNow packets
-when also connected to a wifi network:
+**Power Saving Mode:** The power saving mode causes the device to turn off the
+radio periodically (search the internet for "DTIM Interval" for further
+details), making it unreliable in receiving ESPNow messages. There are several
+options to improve reliability of receiving ESPNow packets when also connected
+to a wifi network:
 
 1. Disable the power-saving mode on the STA_IF interface:
 
-   - Use ``WLAN(STA_IF).config(ps_mode=WIFI_PS_NONE)``
+   - Use ``w0.config(ps_mode=WIFI_PS_NONE)``
    - This requires the ESPNow patches on ESP32 (not supported in micropython
      as of v1.19).
 
-2. Use the AP_IF interface to send/receive ESPNow traffic:
+2. Turning on the AP_IF interface will also disable the power saving mode. So
+   long as the AP_IF interface is also active, receiving messages through the
+   STA_IF interface will work reliably. However, the device will then be
+   advertising an active wifi access point.
 
-   - Register all peers with ``e.add_peer(peer, lmk, channel, network.AP_IF)``
-   - Configure peers to send messages to the ``AP_IF`` mac address
-   - This will also activate the ESP32 as an access point!
+   - Since the AP_IF interface is active you **may** also choose to send and
+     receive your messages via the AP_IF interface, but this is not necessary.
 
 3. Configure ESPNow clients to retry sending messages.
 
-**Example 1:** Disable power saving mode on STA_IF::
+**Managing wifi channels:** Any other espnow devices wishing to communicate with
+a device which is also connected to a Wifi Access Point MUST use the same
+channel. A common scenario is where one espnow device is connected to a wifi
+router and acts as a proxy for messages from a group of sensors connected via
+espnow:
 
-  import network
-  import espnow
+**Proxy:** ::
 
-  peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
-  e = espnow.ESPNow()
-  e.active(True)
+  import time, network, espnow
 
-  w0 = network.WLAN(network.STA_IF)
-  w0.active(True)
+  e = espnow.ESPNow(); e.active(True)
+  w0 = network.WLAN(network.STA_IF); w0.active(True)
   w0.connect('myssid', 'myppassword')
   while not w0.isconnected():            # Wait until connected...
       time.sleep(0.1)
   w0.config(ps_mode=network.WIFI_PS_NONE)  # ..then disable power saving
+  # network.WLAN(network.AP_IF).active(True)  # Alternative to above
 
-  e.add_peer(peer)                       # Register peer on STA_IF
-  if not e.send(peer, b'ping'):          # Message will be from STA_IF mac address
-    print('Ping failed!')
+  # Print the wifi channel used AFTER connecting to access point
+  print("Proxy running on channel:", w0.config("channel"))
 
-  print('Send me messages at:', w0.config('mac'))
+  for peer, msg in e:
+      # Receive espnow messages and forward them to MQTT broker over wifi
 
-**Example 2:** Send and receive ESPNow traffic on AP_IF interface::
+**Sensor:** ::
 
-  import network
-  import espnow
+  import network, espnow
 
-  peer = b'feedee'                       # MAC address of peer
-  e = espnow.ESPNow()
-  e.active(True)
-
-  w0 = network.WLAN(network.STA_IF)
-  w0.active(True)                        # Set channel will fail unless Active
-  w0.connect('myssid', 'myppassword')
-
-  w1 = network.WLAN(network.AP_IF)
-  w1.config(hidden=True)                 # AP_IF operates on same channel as STA_IF
-  w1.active(True)
-
-  e.add_peer(peer, None, None, network.AP_IF)  # Register peer on AP_IF
-  e.send(peer, b'ping')                  # Message will be from AP_IF mac address
-
-  print('Send me messages at:', w1.config('mac'))
+  peer = b'0\xaa\xaa\xaa\xaa\xaa'  # MAC address of proxy
+  e = espnow.ESPNow(); e.active(True);
+  w0 = network.WLAN(network.STA_IF); w0.active(True); w0.disconnect()
+  w0.config(channel=6)    # Change to the channel used by the proxy above.
+  e.add_peer(peer)
+  while True:
+      msg = read_sensor()
+      e.send(peer, msg)
 
 Other issues to take care with when using ESPNow with wifi are:
 
-- If using the ESP32 Access Point (AP_IF) while also connected to another
-  Access Point (on STA_IF), the AP_IF will always operate on the same channel
-  as the STA_IF regardless of the channel you set for the AP_IF
-  (see
-  `Attention Note 3
+- If the AP_IF interface is active while the STA_IF is also connected to a Wifi
+  Access Point, the AP_IF will always operate on the same channel as the STA_IF;
+  regardless of the channel you set for the AP_IF (see `Attention Note 3
   <https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html#_CPPv419esp_wifi_set_config16wifi_interface_tP13wifi_config_t>`_
-  ).
+  ). After all, there is really only one wifi radio on the device, which is
+  shared by the STA_IF and AP_IF virtual devices.
 
 - Some versions of the ESP IDF only permit sending ESPNow packets from the
   STA_IF interface to peers which have been registered on the same wifi
