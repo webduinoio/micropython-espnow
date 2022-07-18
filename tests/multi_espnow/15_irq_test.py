@@ -71,6 +71,7 @@ def instance0():
     print("Server Done")
     e.active(False)
 
+
 done = False
 
 # Client
@@ -87,7 +88,6 @@ def instance1():
     multitest.next()
     peer = PEERS[0]
     e.add_peer(peer)
-
 
     def on_recv_cb(e):
         global done

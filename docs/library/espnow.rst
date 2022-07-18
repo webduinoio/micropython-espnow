@@ -851,6 +851,12 @@ Other issues to take care with when using ESPNow with wifi are:
   ). After all, there is really only one wifi radio on the device, which is
   shared by the STA_IF and AP_IF virtual devices.
 
+- If the esp device is connected to a Wifi Access Point that goes down, the
+  device will start scanning channels in an attempt to reconnect to the Access
+  Point. This means espnow messages will be lost while scanning for the AP. This
+  can be disabled by ``w0.config(reconnects=0)``, which will also disable the
+  automatic reconnection after losing connection.
+
 - Some versions of the ESP IDF only permit sending ESPNow packets from the
   STA_IF interface to peers which have been registered on the same wifi
   channel as the STA_IF::
