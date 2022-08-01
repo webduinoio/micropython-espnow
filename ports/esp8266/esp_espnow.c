@@ -368,7 +368,7 @@ STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     // Fix: if message is not in gc pool, copy to a temp buffer.
     static char temp[ESP_NOW_MAX_DATA_LEN];  // Static to save code space
     byte *p = (byte *)message.buf;
-    if (p < MP_STATE_MEM(gc_pool_start) || MP_STATE_MEM(gc_pool_end) < p) {
+    if (p < MP_STATE_MEM(area.gc_pool_start) || MP_STATE_MEM(area.gc_pool_end) < p) {
         // If buffer is not in GC pool copy from ROM to stack
         memcpy(temp, message.buf, message.len);
         message.buf = temp;
