@@ -406,6 +406,10 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                         }
                         break;
                     }
+                    case MP_QSTR_ps_mode: {
+                        wifi_set_sleep_type(mp_obj_get_int(kwargs->table[i].value));
+                        break;
+                    }
                     default:
                         goto unknown;
                 }
@@ -473,6 +477,10 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
             }
             break;
         }
+        case MP_QSTR_ps_mode: {
+            val = MP_OBJ_NEW_SMALL_INT(wifi_get_sleep_type());
+            break;
+        }
         default:
             goto unknown;
     }
@@ -537,6 +545,10 @@ STATIC const mp_rom_map_elem_t mp_module_network_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_MODE_11B), MP_ROM_INT(PHY_MODE_11B) },
     { MP_ROM_QSTR(MP_QSTR_MODE_11G), MP_ROM_INT(PHY_MODE_11G) },
     { MP_ROM_QSTR(MP_QSTR_MODE_11N), MP_ROM_INT(PHY_MODE_11N) },
+
+    { MP_ROM_QSTR(MP_QSTR_WIFI_PS_NONE), MP_ROM_INT(NONE_SLEEP_T) },
+    { MP_ROM_QSTR(MP_QSTR_WIFI_PS_MIN_MODEM), MP_ROM_INT(MODEM_SLEEP_T) },
+    { MP_ROM_QSTR(MP_QSTR_WIFI_PS_MAX_MODEM), MP_ROM_INT(MODEM_SLEEP_T) },
 
     { MP_ROM_QSTR(MP_QSTR_AUTH_OPEN), MP_ROM_INT(AUTH_OPEN) },
     { MP_ROM_QSTR(MP_QSTR_AUTH_WEP), MP_ROM_INT(AUTH_WEP) },
