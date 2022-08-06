@@ -69,9 +69,9 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     import espnow
 
     # A WLAN interface must be active to send()/recv()
-    w0 = network.WLAN(network.STA_IF)  # Or network.AP_IF
-    w0.active(True)
-    w0.disconnect()   # For ESP8266
+    sta = network.WLAN(network.STA_IF)  # Or network.AP_IF
+    sta.active(True)
+    sta.disconnect()   # For ESP8266
 
     e = espnow.ESPNow()
     e.active(True)
@@ -89,9 +89,9 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     import espnow
 
     # A WLAN interface must be active to send()/recv()
-    w0 = network.WLAN(network.STA_IF)
-    w0.active(True)
-    w0.disconnect()   # Because ESP8266 auto-connects to last Access Point
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    sta.disconnect()   # Because ESP8266 auto-connects to last Access Point
 
     e = espnow.ESPNow()
     e.active(True)
@@ -201,9 +201,9 @@ For example::
 
     import network
 
-    w0 = network.WLAN(network.STA_IF)
-    w0.active(True)
-    w0.disconnect()    # For ESP8266
+    sta = network.WLAN(network.STA_IF)
+    sta.active(True)
+    sta.disconnect()    # For ESP8266
 
 **Note:** The ESP8266 has a *feature* that causes it to automatically reconnect
 to the last wifi Access Point when set `active(True)<network.WLAN.active>`
@@ -785,25 +785,28 @@ happen which affect ESPNow communications:
 
 **Power Saving Mode:** The power saving mode causes the device to turn off the
 radio periodically (search the internet for "DTIM Interval" for further
-details), making it unreliable in receiving ESPNow messages. There are several
-options to improve reliability of receiving ESPNow packets when also connected
-to a wifi network:
+details), making it unreliable in receiving ESPNow messages. This can be
+resolved by either of:
 
-1. Disable the power-saving mode on the STA_IF interface:
+1. Disabling the power-saving mode on the STA_IF interface (ESP32 only);
 
-   - Use ``w0.config(ps_mode=WIFI_PS_NONE)``
-   - This requires the ESPNow patches on ESP32 (not supported in micropython
-     as of v1.19).
+   - Use ``sta.config(ps_mode=WIFI_PS_NONE)``
 
-2. Turning on the AP_IF interface will also disable the power saving mode. So
-   long as the AP_IF interface is also active, receiving messages through the
-   STA_IF interface will work reliably. However, the device will then be
-   advertising an active wifi access point.
+2. Turning on the AP_IF interface will also disable the power saving mode.
+   However, the device will then be advertising an active wifi access point.
 
-   - Since the AP_IF interface is active you **may** also choose to send and
-     receive your messages via the AP_IF interface, but this is not necessary.
+   - You **may** also choose to send your messages via the AP_IF
+     interface, but this is not necessary.
+   - ESP8266 peers must send messages to this AP_IF interface (see below).
 
-3. Configure ESPNow clients to retry sending messages.
+3. Configuring ESPNow clients to retry sending messages.
+
+**Receiving messages from an ESP8266 device:** Strangely, an ESP32 device
+connected to a wifi network using method 1 or 2 above, will receive ESP-Now
+messages sent to the STA_IF MAC address from another ESP32 device, but will
+**reject** messages from an ESP8266 device!!!. To receive messages from an
+ESP8266 device, the AP_IF interface must be set to ``active(True)`` **and**
+messages must be sent to the AP_IF MAC address.
 
 **Managing wifi channels:** Any other espnow devices wishing to communicate with
 a device which is also connected to a Wifi Access Point MUST use the same
@@ -813,19 +816,18 @@ espnow:
 
 **Proxy:** ::
 
-  import time, network, espnow
+  import network, time, espnow
 
-  e = espnow.ESPNow(); e.active(True)
-  w0 = network.WLAN(network.STA_IF); w0.active(True)
-  w0.connect('myssid', 'myppassword')
-  while not w0.isconnected():            # Wait until connected...
+  sta, ap = wifi_reset()  # Reset wifi to AP off, STA on and disconnected
+  sta.connect('myssid', 'mypassword')
+  while not sta.isconnected():              # Wait until connected...
       time.sleep(0.1)
-  w0.config(ps_mode=network.WIFI_PS_NONE)  # ..then disable power saving
-  # network.WLAN(network.AP_IF).active(True)  # Alternative to above
+  sta.config(ps_mode=network.WIFI_PS_NONE)  # ..then disable power saving
+  # ap.active(True)  # Alternative to above
 
-  # Print the wifi channel used AFTER connecting to access point
-  print("Proxy running on channel:", w0.config("channel"))
-
+  # Print the wifi channel used AFTER finished connecting to access point
+  print("Proxy running on channel:", sta.config("channel"))
+  e = espnow.ESPNow(); e.active(True)
   for peer, msg in e:
       # Receive espnow messages and forward them to MQTT broker over wifi
 
@@ -833,40 +835,61 @@ espnow:
 
   import network, espnow
 
+  sta, ap = wifi_reset()   # Reset wifi to AP off, STA on and disconnected
+  sta.config(channel=6)    # Change to the channel used by the proxy above.
   peer = b'0\xaa\xaa\xaa\xaa\xaa'  # MAC address of proxy
   e = espnow.ESPNow(); e.active(True);
-  w0 = network.WLAN(network.STA_IF); w0.active(True); w0.disconnect()
-  w0.config(channel=6)    # Change to the channel used by the proxy above.
   e.add_peer(peer)
   while True:
       msg = read_sensor()
       e.send(peer, msg)
+      time.sleep(1)
 
 Other issues to take care with when using ESPNow with wifi are:
 
-- If the AP_IF interface is active while the STA_IF is also connected to a Wifi
-  Access Point, the AP_IF will always operate on the same channel as the STA_IF;
-  regardless of the channel you set for the AP_IF (see `Attention Note 3
+- **Set WIFI to known state on startup:** Micropython does NOT reset the wifi
+  peripheral after a soft reset. This can lead to unexpected behaviour. To
+  guarantee the wifi is reset to a known state after a soft reset make sure you
+  deactivate the STA_IF and AP_IF before setting them to the desired state at
+  startup, eg.::
+
+    import network, time
+
+    def wifi_reset():   # Reset wifi to AP_IF off, STA_IF on and disconnected
+      sta = network.WLAN(network.STA_IF); sta.active(False)
+      ap = network.WLAN(network.AP_IF); ap.active(False)
+      sta.active(True)
+      sta.disconnect()   # For ESP8266
+      while sta.isconnected():
+          time.sleep(0.1)
+      return sta, ap
+
+    sta, ap = wifi_reset()
+
+  Remember that a soft reset occurs every time you connect to the device repl and
+  when you type ``ctrl-D``. See `Issue 9004
+  <https://github.com/micropython/micropython/issues/8994>`_ for more information.
+
+
+- **STA_IF and AP_IF always operate on the same channel:** the AP_IF wil change
+  channel when you connect to a wifi network; regardless of the channel you set
+  for the AP_IF (see `Attention Note 3
   <https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html#_CPPv419esp_wifi_set_config16wifi_interface_tP13wifi_config_t>`_
   ). After all, there is really only one wifi radio on the device, which is
   shared by the STA_IF and AP_IF virtual devices.
 
-- If the esp device is connected to a Wifi Access Point that goes down, the
-  device will start scanning channels in an attempt to reconnect to the Access
-  Point. This means espnow messages will be lost while scanning for the AP. This
-  can be disabled by ``w0.config(reconnects=0)``, which will also disable the
-  automatic reconnection after losing connection.
+- **Micropython re-scans wifi channels when trying to reconnect:** If the esp
+  device is connected to a Wifi Access Point that goes down, micropython will
+  automaticially start scanning channels in an attempt to reconnect to the
+  Access Point. This means espnow messages will be lost while scanning for the
+  AP. This can be disabled by ``sta.config(reconnects=0)``, which will also
+  disable the automatic reconnection after losing connection.
 
 - Some versions of the ESP IDF only permit sending ESPNow packets from the
   STA_IF interface to peers which have been registered on the same wifi
   channel as the STA_IF::
 
     ESPNOW: Peer channel is not equal to the home channel, send fail!
-
-- Some versions of the ESP IDF don't permit setting the channel of the STA_IF
-  at all, other than by connecting to an Access Point (This seems to be fixed
-  in IDF 4+). Micropython versions without the ESPNow patches also provide no
-  support for setting the channel of the STA_IF.
 
 ESPNow and Sleep Modes
 ----------------------
@@ -886,53 +909,40 @@ sleep. If the ``STA_IF`` and ``AP_IF`` interfaces have both been set
 
 **Example:** deep sleep::
 
-  import network
-  import machine
-  import espnow
+  import network, machine, espnow
 
-  peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
+  sta, ap = wifi_reset()            # Reset wifi to AP off, STA on and disconnected
+  peer = b'0\xaa\xaa\xaa\xaa\xaa'   # MAC address of peer
   e = espnow.ESPNow()
   e.active(True)
-
-  w0 = network.WLAN(network.STA_IF)
-  w0.active(True)
-  e.add_peer(peer)                       # Register peer on STA_IF
+  e.add_peer(peer)                  # Register peer on STA_IF
 
   print('Sending ping...')
   if not e.send(peer, b'ping'):
     print('Ping failed!')
-
   e.active(False)
-  w0.active(False)                       # Disable the wifi before sleep
-
+  sta.active(False)                 # Disable the wifi before sleep
   print('Going to sleep...')
-  machine.deepsleep(10000)               # Sleep for 10 seconds then reboot
+  machine.deepsleep(10000)          # Sleep for 10 seconds then reboot
 
 **Example:** light sleep::
 
-  import network
-  import machine
-  import espnow
+  import network, machine, espnow
 
-  peer = b'0\xaa\xaa\xaa\xaa\xaa'        # MAC address of peer
+  sta, ap = wifi_reset()            # Reset wifi to AP off, STA on and disconnected
+  sta.config(channel=6)
+  peer = b'0\xaa\xaa\xaa\xaa\xaa'   # MAC address of peer
   e = espnow.ESPNow()
   e.active(True)
-
-  w0 = network.WLAN(network.STA_IF)
-  w0.active(True)                        # Set channel will fail unless Active
-  w0.config(channel=6)
-  e.add_peer(peer)                       # Register peer on STA_IF
+  e.add_peer(peer)                  # Register peer on STA_IF
 
   while True:
     print('Sending ping...')
     if not e.send(peer, b'ping'):
       print('Ping failed!')
-
-    w0.active(False)                     # Disable the wifi before sleep
-
+    sta.active(False)               # Disable the wifi before sleep
     print('Going to sleep...')
-    machine.lightsleep(10000)            # Sleep for 10 seconds
-
-    w0.active(True)
-    w0.config(channel=6)                 # Wifi loses config after lightsleep()
+    machine.lightsleep(10000)       # Sleep for 10 seconds
+    sta.active(True)
+    sta.config(channel=6)           # Wifi loses config after lightsleep()
 
