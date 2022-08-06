@@ -410,6 +410,10 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                         wifi_set_sleep_type(mp_obj_get_int(kwargs->table[i].value));
                         break;
                     }
+                    case MP_QSTR_auto_connect: {
+                        wifi_station_set_auto_connect(mp_obj_get_int(kwargs->table[i].value));
+                        break;
+                    }
                     default:
                         goto unknown;
                 }
@@ -479,6 +483,11 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
         }
         case MP_QSTR_ps_mode: {
             val = MP_OBJ_NEW_SMALL_INT(wifi_get_sleep_type());
+            break;
+        }
+        case MP_QSTR_auto_connect: {
+            val = (wifi_station_get_auto_connect() != 0)
+                ? mp_const_true : mp_const_false;
             break;
         }
         default:
