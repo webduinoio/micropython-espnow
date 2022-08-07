@@ -414,6 +414,16 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
                         wifi_station_set_auto_connect(mp_obj_get_int(kwargs->table[i].value));
                         break;
                     }
+                    case MP_QSTR_reconnects: {
+                        req_if = STATION_IF;
+                        if (self->if_id == STATION_IF) {
+                            int reconnects = mp_obj_get_int(kwargs->table[i].value);
+                            // parameter reconnects == -1 means to retry forever.
+                            wifi_station_set_reconnect_policy((reconnects != 0));
+                            wifi_station_dhcpc_set_maxtry((reconnects == -1) ? 255 : reconnects);
+                        }
+                        break;
+                    }
                     default:
                         goto unknown;
                 }
