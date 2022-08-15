@@ -68,7 +68,16 @@ by reading the temperature sensor immediately after waking up from sleep.
 Networking
 ----------
 
-The :mod:`network` module::
+The :mod:`network` module:
+
+Micropython on ESP32 and ESP8266 devices presents two apparently independent
+`network.WLAN<network.WLAN()>` interface objects: ::
+
+    sta = network.WLAN(network.STA_IF)
+    ap = network.WLAN(network.AP_IF)
+
+The ``STA_IF`` interface may be used to connect to a wifi network and the
+``AP_IF`` interface may be used to configure the device as a wifi access point::
 
     import network
 
@@ -77,12 +86,13 @@ The :mod:`network` module::
     wlan.scan()             # scan for access points
     wlan.isconnected()      # check if the station is connected to an AP
     wlan.connect('ssid', 'key') # connect to an AP
-    wlan.config('mac')      # get the interface's MAC address
+    wlan.config('mac')      # get the STA interface's MAC address
     wlan.ifconfig()         # get the interface's IP/netmask/gw/DNS addresses
 
     ap = network.WLAN(network.AP_IF) # create access-point interface
     ap.config(ssid='ESP-AP') # set the SSID of the access point
     ap.config(max_clients=10) # set how many clients can connect to the network
+    ap.config('mac')        # get the AP MAC address (different to STA)
     ap.active(True)         # activate the interface
 
 A useful function for connecting to your local WiFi network is::
@@ -109,6 +119,65 @@ connection succeeds or the interface gets disabled.  This can be changed by
 calling ``wlan.config(reconnects=n)``, where n are the number of desired reconnect
 attempts (0 means it won't retry, -1 will restore the default behaviour of trying
 to reconnect forever).
+
+While the ``STA_IF`` and ``AP_IF`` interfaces appear to operate independently,
+they in fact share the same wifi radio device. For example, you can use the
+``STA_IF`` interface to connect to an existing wifi network while also operating
+the ``AP_IF`` interface as a wifi access point; however both interfaces will
+operate on the same wifi channel. This also means that some of the options to
+the ``wlan.config()`` or ``ap.config()`` methods will affect the operation of
+both interfaces (eg. ``channel``, ``txpower``, and ``pm``).
+
+Some important considerations when using the ``STA_IF`` and ``AP_IF`` wifi
+interfaces on ESP32 and ESP8266 devices:
+
+- **The STA_IF and AP_IF interfaces always operate on the same channel:** The
+  ``AP_IF`` interface will change channel when you connect to a wifi network;
+  regardless of the channel you set for the ``AP_IF``. After all, there is
+  really only one wifi radio on the device, which is shared by the ``STA_IF``
+  and ``AP_IF`` interfaces.
+
+- **Set WIFI to known state on startup on soft reset:** Micropython does not
+  reset the wifi peripheral after a soft reset. (Remember that a soft reset
+  occurs by default every time you connect to the device repl over the serial
+  interface and when you type ``ctrl-D`` at the repl prompt.) If you wish to
+  fully initialise the wifi to a known state on soft reset, your application
+  startup code should deactivate both the ``STA_IF`` and ``AP_IF`` interfaces
+  before setting them to the desired state, eg.::
+
+    import network, time, sys
+
+    def wifi_reset():   # Reset wifi to AP_IF off, STA_IF on and disconnected
+        sta = network.WLAN(network.STA_IF);
+        sta.active(False)
+        ap = network.WLAN(network.AP_IF);
+        ap.active(False)
+        sta.active(True)
+        if sys.platform == "esp8266":
+            sta.disconnect()   # ESP8266 automatically reconnects to last AP
+            while sta.isconnected():
+                time.sleep(0.1)
+        return sta, ap
+
+    sta, ap = wifi_reset()
+    do_connect()
+
+  Nonetheless, some configuration settings may persist across soft resets
+  despite this reset sequence, including the ``txpower`` and ``pm`` config
+  settings. To fully reset the wifi peripheral perform a hard reset with
+  `machine.reset()` or power cycle the device.
+
+- **Micropython STA_IF interface will re-scan wifi channels when trying to
+  reconnect to a wifi network:** If the ``STA_IF`` interface loses connection to
+  a wifi network, micropython will automatically start scanning channels in an
+  attempt to reconnect to the wifi network. If you also have the ``AP_IF``
+  interface configured as an access point, the AP will also be jumping wifi
+  channels until the ``STA_IF`` reconnects to the wifi network. This can be
+  disabled with ``sta.config(reconnects=0)``.
+
+See the `Espressif Wi-Fi documentation
+<https://docs.espressif.com/projects/esp-idf/en/latest/esp32/
+api-reference/network/esp_wifi.html>`_ for more information.
 
 Delay and timing
 ----------------
