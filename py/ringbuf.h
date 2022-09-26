@@ -28,10 +28,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
-#ifdef _MSC_VER
-#include "py/mpconfig.h" // For inline.
-#endif
+#include "py/obj.h"
+#include "py/mpconfig.h"
 
 typedef struct _ringbuf_t {
     uint8_t *buf;
@@ -95,5 +93,9 @@ static inline size_t ringbuf_avail(ringbuf_t *r) {
 int ringbuf_get16(ringbuf_t *r);
 int ringbuf_peek16(ringbuf_t *r);
 int ringbuf_put16(ringbuf_t *r, uint16_t v);
+
+#if MICROPY_PY_MICROPYTHON_RINGBUFFER
+extern const mp_obj_type_t mp_type_micropython_ringbuffer;
+#endif
 
 #endif // MICROPY_INCLUDED_PY_RINGBUF_H

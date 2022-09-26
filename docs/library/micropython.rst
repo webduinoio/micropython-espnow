@@ -147,3 +147,15 @@ Functions
 
    There is a finite queue to hold the scheduled functions and `schedule()`
    will raise a `RuntimeError` if the queue is full.
+
+.. function:: ringbuffer(size)
+.. function:: ringbuffer(buffer)
+   :noindex:
+
+   Provides a fixed-size buffer with stream interface. Can be used similar to
+   `io.BytesIO` however once created no futher memory allocations will ever
+   take place.
+
+   Can be created with integer size provided and a suitable buffer will be created.
+   Alternatively a `bytearray`, `memoryview` or similar object can be provided for
+   in-place use.
