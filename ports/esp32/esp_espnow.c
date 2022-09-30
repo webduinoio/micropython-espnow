@@ -1004,14 +1004,15 @@ STATIC mp_obj_t buffer_make_new(
     return MP_OBJ_FROM_PTR(self);
 }
 
-const mp_obj_type_t espnow_buffer_type = {
-    { &mp_type_type },
-    .name = MP_QSTR_Buffer,
-    .make_new = buffer_make_new,
-    .attr = buffer_attr,
-    // .protocol = &buffer_stream_p,
-    .locals_dict = (mp_obj_t)&buffer_locals_dict,
-};
+MP_DEFINE_CONST_OBJ_TYPE(
+    espnow_buffer_type,
+    MP_QSTR_Buffer,
+    MP_TYPE_FLAG_NONE,
+    make_new, buffer_make_new,
+    attr, buffer_attr,
+    // protocol, &espnow_stream_p,
+    locals_dict, &buffer_locals_dict
+    );
 #endif
 
 #if MICROPY_ESPNOW_RSSI
