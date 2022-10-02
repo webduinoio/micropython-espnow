@@ -43,7 +43,7 @@ Table of Contents:
 Introduction
 ------------
 
-ESP-NOW is a connectionless wireless communication protocol supporting:
+ESP-NOW is a connection-less wireless communication protocol supporting:
 
 - Direct communication between up to 20 registered peers:
 
@@ -436,8 +436,8 @@ The Espressif ESP-Now software requires that other devices (peers) must be
           transfers with this peer (unless the *encrypt* parameter is set to
           *False*). Must be:
 
-          - a byte-string, bytearray ot string of length ``espnow.KEY_LEN`` (16
-            bytes), or
+          - a byte-string or bytearray of string of length ``espnow.KEY_LEN``
+            (16 bytes), or
 
           - any non ``True`` python value (default= ``b''``), signifying an
             *empty* key which will disable encryption.
@@ -850,7 +850,7 @@ espnow:
 
 Other issues to take care with when using ESPNow with wifi are:
 
-- **Set WIFI to known state on startup:** Micropython does NOT reset the wifi
+- **Set WIFI to known state on startup:** Micropython does not reset the wifi
   peripheral after a soft reset. This can lead to unexpected behaviour. To
   guarantee the wifi is reset to a known state after a soft reset make sure you
   deactivate the STA_IF and AP_IF before setting them to the desired state at
@@ -862,6 +862,8 @@ Other issues to take care with when using ESPNow with wifi are:
       sta = network.WLAN(network.STA_IF); sta.active(False)
       ap = network.WLAN(network.AP_IF); ap.active(False)
       sta.active(True)
+      while not sta.active():
+          time.sleep(0.1)
       sta.disconnect()   # For ESP8266
       while sta.isconnected():
           time.sleep(0.1)
@@ -869,21 +871,33 @@ Other issues to take care with when using ESPNow with wifi are:
 
     sta, ap = wifi_reset()
 
-  Remember that a soft reset occurs every time you connect to the device repl and
-  when you type ``ctrl-D``. See `Issue 9004
-  <https://github.com/micropython/micropython/issues/8994>`_ for more information.
-
+  Remember that a soft reset occurs every time you connect to the device repl
+  and when you type ``ctrl-D``. See `Issue 9004
+  <https://github.com/micropython/micropython/issues/8994>`_ for more
+  information.
 
 - **STA_IF and AP_IF always operate on the same channel:** the AP_IF wil change
   channel when you connect to a wifi network; regardless of the channel you set
   for the AP_IF (see `Attention Note 3
-  <https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html#_CPPv419esp_wifi_set_config16wifi_interface_tP13wifi_config_t>`_
+  <https://docs.espressif.com/
+  projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
+  #_CPPv419esp_wifi_set_config16wifi_interface_tP13wifi_config_t>`_
   ). After all, there is really only one wifi radio on the device, which is
   shared by the STA_IF and AP_IF virtual devices.
 
+- **Disable automatic channel assignment on your wifi router:** If the wifi
+  router for your wifi network is configured to automatically assign the wifi
+  channel, it may change the channel for the network if it detects interference
+  from other wifi routers. When this occurs, the ESP devices connected to the
+  wifi network will also change channels to match the router, but other
+  ESPNow-only devices will remain on the previous channel and communication will
+  be lost. To mitigate this, either set your wifi router to use a fixed wifi
+  channel or configure your devices to re-scan the wifi channels if they are
+  unable to find their expected peers on the current channel.
+
 - **Micropython re-scans wifi channels when trying to reconnect:** If the esp
   device is connected to a Wifi Access Point that goes down, micropython will
-  automaticially start scanning channels in an attempt to reconnect to the
+  automatically start scanning channels in an attempt to reconnect to the
   Access Point. This means espnow messages will be lost while scanning for the
   AP. This can be disabled by ``sta.config(reconnects=0)``, which will also
   disable the automatic reconnection after losing connection.
@@ -899,7 +913,7 @@ ESPNow and Sleep Modes
 
 The `machine.lightsleep([time_ms])<machine.lightsleep>` and
 `machine.deepsleep([time_ms])<machine.deepsleep>` functions can be used to put
-the ESP32 and periperals (including the WiFi and Bluetooth radios) to sleep.
+the ESP32 and peripherals (including the WiFi and Bluetooth radios) to sleep.
 This is useful in many applications to conserve battery power. However,
 applications must disable the WLAN peripheral (using
 `active(False)<network.WLAN.active>`) before entering light or deep sleep (see
