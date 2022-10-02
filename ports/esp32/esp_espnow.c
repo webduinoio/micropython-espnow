@@ -105,7 +105,8 @@ static const size_t BUSY_WAIT_MS = 25;
 // The data structure for the espnow_singleton.
 typedef struct _esp_espnow_obj_t {
     mp_obj_base_t base;
-    buffer_t recv_buffer;           // A buffer for received packets
+    bool initialised;
+    micropython_ringbuffer_obj_t *recv_buffer; // A buffer for received packets
     size_t recv_buffer_size;        // The size of the recv_buffer
     size_t recv_timeout_ms;         // Timeout for recv()
     volatile size_t rx_packets;     // # of received packets
@@ -136,7 +137,7 @@ static esp_espnow_obj_t *_get_singleton() {
 static esp_espnow_obj_t *_get_singleton_initialised() {
     esp_espnow_obj_t *self = _get_singleton();
     // assert(self);
-    if (self->recv_buffer == NULL) {
+    if (!self->initialised) {
         // Throw an espnow not initialised error
         check_esp_err(ESP_ERR_ESPNOW_NOT_INIT);
     }
@@ -159,6 +160,7 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
     }
     self = m_new_obj(esp_espnow_obj_t);
     self->base.type = &esp_espnow_type;
+    self->initialised = false;
     self->recv_buffer_size = DEFAULT_RECV_BUFFER_SIZE;
     self->recv_timeout_ms = DEFAULT_RECV_TIMEOUT_MS;
     self->recv_buffer = NULL;       // Buffer is allocated in espnow_init()
@@ -186,10 +188,10 @@ STATIC void recv_cb(const uint8_t *mac_addr, const uint8_t *data, int len);
 // Returns None.
 static mp_obj_t espnow_init(mp_obj_t _) {
     esp_espnow_obj_t *self = _get_singleton();
-    if (self->recv_buffer == NULL) {    // Already initialised
-        self->recv_buffer = buffer_init(self->recv_buffer_size);
-        self->recv_buffer_size = buffer_size(self->recv_buffer);
-
+    if (!self->initialised) {    // Already initialised
+        self->initialised = true;
+        self->recv_buffer = MP_OBJ_TO_PTR(mp_obj_new_ringbuffer(
+            NULL, self->recv_buffer_size, self->recv_timeout_ms));
         esp_initialise_wifi();  // Call the wifi init code in network_wlan.c
         check_esp_err(esp_now_init());
         check_esp_err(esp_now_register_recv_cb(recv_cb));
@@ -204,11 +206,12 @@ static mp_obj_t espnow_init(mp_obj_t _) {
 // reset, so cannot be declared STATIC and must guard against self == NULL;.
 mp_obj_t espnow_deinit(mp_obj_t _) {
     esp_espnow_obj_t *self = _get_singleton();
-    if (self != NULL && self->recv_buffer != NULL) {
+    if (self != NULL && self->initialised) {
+        self->initialised = false;
         check_esp_err(esp_now_unregister_recv_cb());
         check_esp_err(esp_now_unregister_send_cb());
         check_esp_err(esp_now_deinit());
-        buffer_release(self->recv_buffer);
+        self->recv_buffer->ringbuffer.buf = NULL;
         self->recv_buffer = NULL;
         self->peer_count = 0; // esp_now_deinit() removes all peers.
         self->tx_packets = self->tx_responses;
@@ -225,7 +228,7 @@ STATIC mp_obj_t espnow_active(size_t n_args, const mp_obj_t *args) {
             espnow_deinit(self);
         }
     }
-    return self->recv_buffer != NULL ? mp_const_true : mp_const_false;
+    return self->initialised ? mp_const_true : mp_const_false;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_active_obj, 1, 2, espnow_active);
 
@@ -449,7 +452,8 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
 
     // Read the packet header from the incoming buffer
     espnow_hdr_t hdr;
-    if (!buffer_recv(self->recv_buffer, &hdr, sizeof(hdr), timeout_ms)) {
+    ringbuf_t *buf = &self->recv_buffer->ringbuffer;
+    if (!ringbuf_read_wait(buf, &hdr, sizeof(hdr), timeout_ms)) {
         return MP_OBJ_NEW_SMALL_INT(0);    // Timeout waiting for packet
     }
     int msg_len = hdr.msg_len;
@@ -457,8 +461,8 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
     // Check the message packet header format and read the message data
     if (hdr.magic != ESPNOW_MAGIC ||
         msg_len > ESP_NOW_MAX_DATA_LEN ||
-        !buffer_get(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) ||
-        !buffer_get(self->recv_buffer, msg_buf, msg_len)) {
+        !ringbuf_read(buf, peer_buf, ESP_NOW_ETH_ALEN) ||
+        !ringbuf_read(buf, msg_buf, msg_len)) {
         mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recv(): buffer error"));
     }
     if (mp_obj_is_type(msg, &mp_type_bytearray)) {
@@ -485,7 +489,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recvinto_obj, 2, 3, espnow_rec
 STATIC mp_obj_t espnow_any(const mp_obj_t _) {
     esp_espnow_obj_t *self = _get_singleton_initialised();
 
-    return buffer_empty(self->recv_buffer) ? mp_const_false : mp_const_true;
+    return mp_obj_new_int(ringbuf_avail(&self->recv_buffer->ringbuffer));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_any_obj, espnow_any);
 
@@ -583,8 +587,8 @@ STATIC void recv_cb(
     const uint8_t *mac_addr, const uint8_t *msg, int msg_len) {
 
     esp_espnow_obj_t *self = _get_singleton();
-    buffer_t buf = self->recv_buffer;
-    if (sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
+    ringbuf_t *buf = &self->recv_buffer->ringbuffer;
+    if (sizeof(espnow_pkt_t) + msg_len >= ringbuf_free(buf)) {
         self->dropped_rx_pkts++;
         return;
     }
@@ -596,9 +600,9 @@ STATIC void recv_cb(
     header.time_ms = mp_hal_ticks_ms();
     #endif // MICROPY_ESPNOW_RSSI
 
-    buffer_put(buf, &header, sizeof(header));
-    buffer_put(buf, mac_addr, ESP_NOW_ETH_ALEN);
-    buffer_put(buf, msg, msg_len);
+    ringbuf_write(buf, &header, sizeof(header));
+    ringbuf_write(buf, mac_addr, ESP_NOW_ETH_ALEN);
+    ringbuf_write(buf, msg, msg_len);
     self->rx_packets++;
     if (self->recv_cb != mp_const_none) {
         mp_sched_schedule(self->recv_cb, self->recv_cb_arg);
@@ -844,10 +848,10 @@ STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
         return MP_STREAM_ERROR;
     }
     esp_espnow_obj_t *self = _get_singleton();
-    return (self->recv_buffer == NULL) ? 0 :  // If not initialised
+    return (!self->initialised) ? 0 :  // If not initialised
            arg & (
                // If no data in the buffer, unset the Read ready flag
-               (buffer_empty(self->recv_buffer) ? 0: MP_STREAM_POLL_RD) |
+               ((ringbuf_avail(&self->recv_buffer->ringbuffer) == 0) ? 0: MP_STREAM_POLL_RD) |
                // If still waiting for responses, unset the Write ready flag
                (self->tx_responses < self->tx_packets ? 0: MP_STREAM_POLL_WR));
 }
@@ -871,6 +875,9 @@ STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
     }
     if (attr == MP_QSTR_peers_table) {
         dest[0] = self->peers_table;
+        return;
+    } else if (attr == MP_QSTR_buffer) {
+        dest[0] = MP_OBJ_FROM_PTR(self->recv_buffer);
         return;
     }
     dest[1] = MP_OBJ_SENTINEL;  // Attribute not found
