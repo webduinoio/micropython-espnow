@@ -93,6 +93,10 @@ static inline size_t ringbuf_avail(ringbuf_t *r) {
 int ringbuf_get16(ringbuf_t *r);
 int ringbuf_peek16(ringbuf_t *r);
 int ringbuf_put16(ringbuf_t *r, uint16_t v);
+int ringbuf_read(ringbuf_t *r, void *data, size_t data_len);
+int ringbuf_write(ringbuf_t *r, const void *data, size_t data_len);
+int ringbuf_read_wait(ringbuf_t *r, void *data, size_t data_len, size_t timeout_ms);
+int ringbuf_write_wait(ringbuf_t *r, const void *data, size_t data_len, size_t timeout_ms);
 
 #if MICROPY_PY_MICROPYTHON_RINGBUFFER
 extern const mp_obj_type_t mp_type_micropython_ringbuffer;
