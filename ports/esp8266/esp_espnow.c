@@ -45,16 +45,11 @@
 #include "py/objarray.h"
 #include "py/stream.h"
 #include "py/binary.h"
-#include "esp_espnow.h"
+#include "py/ringbuf.h"
 
 #include "mpconfigport.h"
 
-// Reduce code size by declaring all ring-buffer functions static
-#define RING_BUFFER_INCLUDE_AS_STATIC
-#include "shared/runtime/ring_buffer.h"
-// Include the "static" ring_buffer function defs in this file.
-// This reduces code size on the ESP8266 by 88 bytes.
-#include "shared/runtime/ring_buffer.c"
+#include "esp_espnow.h"
 
 // For the esp8266
 #define ESP_NOW_MAX_DATA_LEN (250)
@@ -103,7 +98,7 @@ static const size_t MAX_PACKET_LEN = (
 // The data structure for the espnow_singleton.
 typedef struct _esp_espnow_obj_t {
     mp_obj_base_t base;
-    buffer_t recv_buffer;           // A buffer for received packets
+    ringbuf_t *recv_buffer;         // A buffer for received packets
     size_t recv_buffer_size;        // Size of recv buffer
     size_t recv_timeout_ms;         // Timeout for irecv()
     size_t tx_packets;              // Count of sent packets
@@ -138,11 +133,12 @@ static esp_espnow_obj_t *_get_singleton() {
 }
 
 static esp_espnow_obj_t *_get_singleton_initialised() {
-    if (espnow_singleton.recv_buffer == NULL) {
+    esp_espnow_obj_t *self = _get_singleton();
+    if (self->recv_buffer == NULL) {
         // Throw an espnow not initialised error
         check_esp_err(ESP_ERR_ESPNOW_NOT_INIT);
     }
-    return _get_singleton();
+    return self;
 }
 
 // Allocate and initialise the ESPNow module as a singleton.
@@ -167,7 +163,7 @@ mp_obj_t espnow_deinit(mp_obj_t _) {
     if (self->recv_buffer != NULL) {
         // esp_now_unregister_recv_cb();
         esp_now_deinit();
-        // buffer_release(self->recv_buffer);
+        self->recv_buffer->buf = NULL;
         self->recv_buffer = NULL;
         self->tx_packets = self->tx_responses;
     }
@@ -184,7 +180,8 @@ STATIC mp_obj_t espnow_active(size_t n_args, const mp_obj_t *args) {
     if (n_args > 1) {
         if (mp_obj_is_true(args[1])) {
             if (self->recv_buffer == NULL) {    // Already initialised
-                self->recv_buffer = buffer_init(self->recv_buffer_size);
+                self->recv_buffer = m_new_obj(ringbuf_t);
+                ringbuf_alloc(self->recv_buffer, self->recv_buffer_size);
                 MP_STATE_PORT(espnow_buffer) = self->recv_buffer;
                 esp_now_init();
                 esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
@@ -246,17 +243,18 @@ STATIC void send_cb(uint8_t *mac_addr, uint8_t status) {
 // Schedules the user callback if one has been registered (ESPNow.config()).
 STATIC void recv_cb(uint8_t *mac_addr, uint8_t *msg, uint8_t msg_len) {
     esp_espnow_obj_t *self = _get_singleton();
-    buffer_t buf = self->recv_buffer;
-    if (buf == NULL || sizeof(espnow_pkt_t) + msg_len >= buffer_free(buf)) {
+    ringbuf_t *buf = self->recv_buffer;
+    // TODO: Test this works with ">".
+    if (buf == NULL || sizeof(espnow_pkt_t) + msg_len >= ringbuf_free(buf)) {
         return;
     }
     espnow_hdr_t header;
     header.magic = ESPNOW_MAGIC;
     header.msg_len = msg_len;
 
-    buffer_put(buf, &header, sizeof(header));
-    buffer_put(buf, mac_addr, ESP_NOW_ETH_ALEN);
-    buffer_put(buf, msg, msg_len);
+    ringbuf_write(buf, &header, sizeof(header));
+    ringbuf_write(buf, mac_addr, ESP_NOW_ETH_ALEN);
+    ringbuf_write(buf, msg, msg_len);
 }
 
 // Return C pointer to byte memory string/bytes/bytearray in obj.
@@ -282,7 +280,19 @@ static uint8_t *_get_bytes_len_w(mp_obj_t obj, size_t len) {
 // ### Handling espnow packets in the recv buffer
 //
 
-// ESPNow.recv([timeout_ms, []]):
+// Copy data from the ring buffer - wait if buffer is empty up to timeout_ms
+int ringbuf_read_wait(ringbuf_t *r, void *data, size_t len, int timeout_ms) {
+    int64_t end = mp_hal_ticks_ms() + timeout_ms;
+    int status = 0;
+    while (
+        ((status = ringbuf_read(r, data, len)) == 0) &&
+        (end - (int64_t)mp_hal_ticks_ms()) >= 0) {
+        MICROPY_EVENT_POLL_HOOK;
+    }
+    return status;
+}
+
+// ESPNow.recvinto([timeout_ms, []]):
 // Returns a list of byte strings: (peer_addr, message) where peer_addr is
 // the MAC address of the sending peer.
 // Arguments:
@@ -311,14 +321,16 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
 
     // Read the packet header from the incoming buffer
     espnow_hdr_t hdr;
-    if (!buffer_recv(self->recv_buffer, &hdr, sizeof(hdr), timeout_ms)) {
+    if (ringbuf_read_wait(self->recv_buffer, &hdr, sizeof(hdr), timeout_ms) < 1) {
         return MP_OBJ_NEW_SMALL_INT(0);    // Timeout waiting for packet
     }
     int msg_len = hdr.msg_len;
 
     // Check the message packet header format and read the message data
-    if (!buffer_get(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) ||
-        !buffer_get(self->recv_buffer, msg_buf, msg_len)) {
+    if (hdr.magic != ESPNOW_MAGIC ||
+        msg_len > ESP_NOW_MAX_DATA_LEN ||
+        ringbuf_read(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) < 1 ||
+        ringbuf_read(self->recv_buffer, msg_buf, msg_len) < 1) {
         mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recv(): buffer error"));
     }
     if (mp_obj_is_type(msg, &mp_type_bytearray)) {
@@ -471,7 +483,7 @@ STATIC mp_uint_t espnow_stream_ioctl(mp_obj_t self_in, mp_uint_t request,
     }
     esp_espnow_obj_t *self = _get_singleton();
     return (self->recv_buffer == NULL) ? 0 :  // If not initialised
-           arg ^ (buffer_empty(self->recv_buffer) ? MP_STREAM_POLL_RD : 0);
+           arg ^ ((ringbuf_avail(self->recv_buffer) == 0) ? MP_STREAM_POLL_RD : 0);
 }
 
 STATIC const mp_stream_p_t espnow_stream_p = {
