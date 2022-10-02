@@ -145,35 +145,36 @@ int ringbuf_write_wait(ringbuf_t *r, const void *data, size_t size, size_t timeo
     return ringbuf_write(r, data, size);
 }
 
-typedef struct _micropython_ringbuffer_obj_t {
-    mp_obj_base_t base;
-    ringbuf_t ringbuffer;
-    uint16_t timeout;       // timeout waiting for first char (in ms)
-} micropython_ringbuffer_obj_t;
+// Allows us to alloc a new ringbuffer from C.
+mp_obj_t mp_obj_new_ringbuffer(void *buf, size_t buf_size, uint16_t timeout_ms) {
+    micropython_ringbuffer_obj_t *self = mp_obj_malloc(
+        micropython_ringbuffer_obj_t, &mp_type_micropython_ringbuffer);
+
+    if (buf != NULL) {
+        // buffer passed in, use it directly for ringbuffer
+        self->ringbuffer.buf = buf;
+        self->ringbuffer.size = buf_size;
+        self->ringbuffer.iget = self->ringbuffer.iput = 0;
+    } else {
+        // Allocation buffer, add one extra to buf_size as ringbuf consumes one byte for tracking.
+        ringbuf_alloc(&(self->ringbuffer), buf_size + 1);
+    }
+    self->timeout = timeout_ms;
+    return MP_OBJ_FROM_PTR(self);
+}
+
+#define RINGBUFFER_DEFAULT_TIMEOUT (UINT16_MAX)
 
 STATIC mp_obj_t micropython_ringbuffer_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_check_num(n_args, n_kw, 1, 2, false);
-    mp_int_t buff_size = -1;
     mp_buffer_info_t bufinfo = {NULL, 0, 0};
 
     if (!mp_get_buffer(args[0], &bufinfo, MP_BUFFER_RW)) {
-        buff_size = mp_obj_get_int(args[0]);
+        bufinfo.len = mp_obj_get_int(args[0]);
     }
-    micropython_ringbuffer_obj_t *self = mp_obj_malloc(micropython_ringbuffer_obj_t, type);
-    if (bufinfo.buf != NULL) {
-        // buffer passed in, use it directly for ringbuffer
-        self->ringbuffer.buf = bufinfo.buf;
-        self->ringbuffer.size = bufinfo.len;
-        self->ringbuffer.iget = self->ringbuffer.iput = 0;
-    } else {
-        // Allocation buffer, sdd one extra to buff_size as ringbuf consumes one byte for tracking.
-        ringbuf_alloc(&(self->ringbuffer), buff_size + 1);
-    }
+    uint16_t timeout_ms = (n_args > 1) ? mp_obj_get_int(args[1]) : RINGBUFFER_DEFAULT_TIMEOUT;
 
-    if (n_args > 1) {
-        self->timeout = mp_obj_get_int(args[1]);
-    }
-    return MP_OBJ_FROM_PTR(self);
+    return mp_obj_new_ringbuffer(bufinfo.buf, bufinfo.len, timeout_ms);
 }
 
 STATIC mp_obj_t micropython_ringbuffer_settimeout(mp_obj_t self_in, mp_obj_t timeout_in) {
@@ -234,6 +235,17 @@ STATIC mp_uint_t micropython_ringbuffer_ioctl(mp_obj_t self_in, mp_uint_t reques
     return ret;
 }
 
+STATIC mp_int_t ringbuf_get_buffer(mp_obj_t o_in, mp_buffer_info_t *bufinfo, mp_uint_t flags) {
+    if (flags != MP_BUFFER_READ) {
+        return 1;
+    }
+    micropython_ringbuffer_obj_t *o = MP_OBJ_TO_PTR(o_in);
+    bufinfo->buf = o->ringbuffer.buf;
+    bufinfo->len = o->ringbuffer.size;
+    bufinfo->typecode = 'B';
+    return 0;
+}
+
 STATIC mp_obj_t micropython_ringbuffer_any(mp_obj_t self_in) {
     micropython_ringbuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
     return MP_OBJ_NEW_SMALL_INT(ringbuf_avail(&self->ringbuffer));
@@ -267,6 +279,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
     MP_TYPE_FLAG_NONE,
     make_new, micropython_ringbuffer_make_new,
     protocol, &ringbuffer_stream_p,
+    buffer, ringbuf_get_buffer,
     locals_dict, &micropython_ringbuffer_locals_dict
     );
 

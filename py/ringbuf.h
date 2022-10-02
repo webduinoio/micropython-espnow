@@ -100,6 +100,16 @@ int ringbuf_write_wait(ringbuf_t *r, const void *data, size_t data_len, size_t t
 
 #if MICROPY_PY_MICROPYTHON_RINGBUFFER
 extern const mp_obj_type_t mp_type_micropython_ringbuffer;
+
+typedef struct _micropython_ringbuffer_obj_t {
+    mp_obj_base_t base;
+    ringbuf_t ringbuffer;
+    uint16_t timeout;       // timeout waiting for first char (in ms)
+} micropython_ringbuffer_obj_t;
+
+// Allocate and retun a new ringbuffer object
+// If buf is NULL a new buffer will be allocated of size buff_size.
+mp_obj_t mp_obj_new_ringbuffer(void *buf, size_t buf_size, uint16_t timeout_ms);
 #endif
 
 #endif // MICROPY_INCLUDED_PY_RINGBUF_H
