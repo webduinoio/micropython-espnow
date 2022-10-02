@@ -1,7 +1,9 @@
 # espnow module for MicroPython on ESP32
 # MIT license; Copyright (c) 2022 Glenn Moloney @glenn20
 
-from micropython import const
+from micropython import const, ringbuffer
+import array
+
 from _espnow import *
 
 EVENT_RECV_MSG = const(1)
@@ -9,11 +11,28 @@ EVENT_RECV_MSG = const(1)
 
 class ESPNow(ESPNow):
     # Static buffers for alloc free receipt of messages with ESPNow.irecv().
-    _data = [None, bytearray(MAX_DATA_LEN)]
+    _hdr = array.array('B', b'\x00' * 7)
+    _message = bytearray(MAX_DATA_LEN)
+    _data = [bytearray(ETH_ALEN), None]
     _none_tuple = (None, None)
 
     def __init__(self):
         super().__init__()
+        self.buffer = ringbuffer(2 * MAX_PACKET_LEN)
+
+    def recvinto(self, data, timeout):
+        b = self.buffer
+        if timeout is not None:
+            b.settimeout(timeout)
+        n = b.readinto(self._hdr)
+        if (n != 7):
+            return 0 if n == 0 else -1
+        len = self._hdr[1]
+        if self._hdr[0] != MAGIC or len > 250:
+            raise OSError("Invalid buffer")
+        b.readinto(self._data[0])
+        b.readinto(self._message, len)
+        data[1] = self._message[:len]
 
     def irecv(self, timeout=None):
         n = self.recvinto(self._data, timeout)
