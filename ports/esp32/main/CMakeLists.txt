@@ -27,7 +27,6 @@ set(MICROPY_SOURCE_SHARED
     ${MICROPY_DIR}/shared/runtime/stdout_helpers.c
     ${MICROPY_DIR}/shared/runtime/sys_stdio_mphal.c
     ${MICROPY_DIR}/shared/runtime/pyexec.c
-    ${MICROPY_DIR}/shared/runtime/ring_buffer.c
 )
 
 set(MICROPY_SOURCE_LIB
