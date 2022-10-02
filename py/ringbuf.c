@@ -74,9 +74,76 @@ int ringbuf_put16(ringbuf_t *r, uint16_t v) {
 
 #if MICROPY_PY_MICROPYTHON_RINGBUFFER
 
+#include <string.h>
+
+// Returns:
+//    1: Success
+//    0: Not enough data available to complete read (try again later)
+//   -1: Requested read is larger than buffer - will never succeed
+int ringbuf_read(ringbuf_t *r, void *data, size_t size) {
+    size_t free = ringbuf_avail(r);
+    size = MIN(size, free);
+    uint32_t iget = r->iget;
+    uint32_t iget_a = (iget + size) % r->size;
+    uint8_t *datap = data;
+    if (iget_a < iget) {
+        // Copy part of the data from the space left at the end of the buffer
+        memcpy(datap, r->buf + iget, r->size - iget);
+        datap += (r->size - iget);
+        iget = 0;
+    }
+    memcpy(datap, r->buf + iget, iget_a - iget);
+    r->iget = iget_a;
+    return size;
+}
+
+// Returns:
+//    1: Success
+//    0: Not enough free space available to complete write (try again later)
+//   -1: Requested write is larger than buffer - will never succeed
+int ringbuf_write(ringbuf_t *r, const void *data, size_t size) {
+    size_t free = ringbuf_free(r);
+    size = MIN(size, free);
+    uint32_t iput = r->iput;
+    uint32_t iput_a = (iput + size) % r->size;
+    const uint8_t *datap = data;
+    if (iput_a < iput) {
+        // Copy part of the data to the end of the buffer
+        memcpy(r->buf + iput, datap, r->size - iput);
+        datap += (r->size - iput);
+        iput = 0;
+    }
+    memcpy(r->buf + iput, datap, iput_a - iput);
+    r->iput = iput_a;
+    return size;
+}
+
 #include "py/runtime.h"
 #include "py/stream.h"
 #include "py/mphal.h"
+
+// TODO: Test common code for waiting
+int ringbuf_read_wait(ringbuf_t *r, void *data, size_t size, size_t timeout_ms) {
+    uint32_t t = mp_hal_ticks_ms() + timeout_ms;
+    while (ringbuf_avail(r) < size) {
+        if (mp_hal_ticks_ms() > t) {  // timed out
+            break;
+        }
+        MICROPY_EVENT_POLL_HOOK;
+    }
+    return ringbuf_read(r, data, size);
+}
+
+int ringbuf_write_wait(ringbuf_t *r, const void *data, size_t size, size_t timeout_ms) {
+    uint32_t t = mp_hal_ticks_ms() + timeout_ms;
+    while (ringbuf_free(r) < size) {
+        if (mp_hal_ticks_ms() > t) {  // timed out
+            break;
+        }
+        MICROPY_EVENT_POLL_HOOK;
+    }
+    return ringbuf_write(r, data, size);
+}
 
 typedef struct _micropython_ringbuffer_obj_t {
     mp_obj_base_t base;
@@ -119,58 +186,24 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(micropython_ringbuffer_settimeout_obj, micropyt
 
 STATIC mp_uint_t micropython_ringbuffer_read(mp_obj_t self_in, void *buf_in, mp_uint_t size, int *errcode) {
     micropython_ringbuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    uint32_t t = mp_hal_ticks_ms() + self->timeout;
-    uint8_t *dest = buf_in;
 
-    for (size_t i = 0; i < size; i++) {
-        // Wait for the first/next character.
-        while (ringbuf_avail(&self->ringbuffer) == 0) {
-            if (mp_hal_ticks_ms() > t) {  // timed out
-                if (i <= 0) {
-                    *errcode = MP_EAGAIN;
-                    return MP_STREAM_ERROR;
-                } else {
-                    return i;
-                }
-            }
-            MICROPY_EVENT_POLL_HOOK
-        }
-        *dest++ = ringbuf_get(&(self->ringbuffer));
-        t = mp_hal_ticks_ms() + self->timeout;
+    int nbytes = ringbuf_read_wait(&self->ringbuffer, buf_in, size, self->timeout);
+    if (nbytes <= 0) {
+        *errcode = MP_EAGAIN;
+        return MP_STREAM_ERROR;
     }
-    return size;
+    return nbytes;
 }
 
 STATIC mp_uint_t micropython_ringbuffer_write(mp_obj_t self_in, const void *buf_in, mp_uint_t size, int *errcode) {
     micropython_ringbuffer_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    uint32_t t = mp_hal_ticks_ms() + self->timeout;
-    const uint8_t *src = buf_in;
-    size_t i = 0;
 
-    // Put as many bytes as possible into the transmit buffer.
-    while (i < size && ringbuf_free(&(self->ringbuffer)) > 0) {
-        ringbuf_put(&(self->ringbuffer), *src++);
-        ++i;
+    int nbytes = ringbuf_write_wait(&self->ringbuffer, buf_in, size, self->timeout);
+    if (nbytes <= 0) {
+        *errcode = MP_EAGAIN;
+        return MP_STREAM_ERROR;
     }
-    // If ringbuf full, block until drained elsewhere (eg. irq) or timeout.
-    while (i < size) {
-        while (ringbuf_free(&(self->ringbuffer)) == 0) {
-            if (mp_hal_ticks_ms() > t) {  // timed out
-                if (i <= 0) {
-                    *errcode = MP_EAGAIN;
-                    return MP_STREAM_ERROR;
-                } else {
-                    return i;
-                }
-            }
-            MICROPY_EVENT_POLL_HOOK
-        }
-        ringbuf_put(&(self->ringbuffer), *src++);
-        ++i;
-        t = mp_hal_ticks_ms() + self->timeout;
-    }
-    // Just in case the fifo was drained during refill of the ringbuf.
-    return size;
+    return nbytes;
 }
 
 STATIC mp_uint_t micropython_ringbuffer_ioctl(mp_obj_t self_in, mp_uint_t request, uintptr_t arg, int *errcode) {
