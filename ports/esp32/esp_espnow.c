@@ -208,15 +208,24 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_active_obj, 1, 2, espnow_activ
 //    timeout: Default read timeout (default=300,000 milliseconds)
 STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    esp_espnow_obj_t *self = _get_singleton();
 
-    enum { ARG_rate };
+    enum { ARG_buffer, ARG_rate };
     static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_buffer, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args,
         MP_ARRAY_SIZE(allowed_args), allowed_args, args);
 
+    if (args[ARG_buffer].u_obj != MP_OBJ_NULL) {
+        micropython_ringbuffer_obj_t *rbuf = MP_OBJ_TO_PTR(args[ARG_buffer].u_obj);
+        if (!mp_obj_is_type(rbuf, &mp_type_micropython_ringbuffer)) {
+            mp_raise_TypeError(MP_ERROR_TEXT("Invalid buffer type"));
+        }
+        self->recv_buffer = rbuf;
+    }
     if (args[ARG_rate].u_int >= 0) {
         #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
         esp_initialise_wifi();  // Call the wifi init code in network_wlan.c
@@ -267,14 +276,6 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_stats_obj, espnow_stats);
 // ### Send and Receive ESP_Now data
 //
 
-// Test if data is available to read from the buffers
-STATIC mp_obj_t espnow_any(const mp_obj_t _) {
-    esp_espnow_obj_t *self = _get_singleton_initialised();
-
-    return mp_obj_new_int(ringbuf_avail(&self->recv_buffer->ringbuffer));
-}
-STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_any_obj, espnow_any);
-
 // Return C pointer to byte memory string/bytes/bytearray in obj.
 // Raise ValueError if the length does not match expected len.
 static uint8_t *_get_bytes_len(mp_obj_t obj, size_t len) {
@@ -323,13 +324,17 @@ static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
 STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton_initialised();
     // Check the various combinations of input arguments
-    const uint8_t *peer = (n_args > 2) ? _get_peer(args[1]) : NULL;
-    mp_obj_t msg = (n_args > 2) ? args[2] : (n_args == 2) ? args[1] : MP_OBJ_NULL;
+    const uint8_t *peer = _get_peer(args[1]);
+    mp_obj_t msg = args[2];
     bool sync = n_args <= 3 || args[3] == mp_const_none || mp_obj_is_true(args[3]);
+    size_t size = n_args > 4 ? mp_obj_get_int(args[4]) : 0;
 
     // Get a pointer to the data buffer of the message
     mp_buffer_info_t message;
     mp_get_buffer_raise(msg, &message, MP_BUFFER_READ);
+    if (size > 0) {
+        message.len = MIN(message.len, size);
+    }
 
     if (sync) {
         // Flush out any pending responses.
@@ -352,7 +357,7 @@ STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     // Return False if sync and any peers did not respond.
     return mp_obj_new_bool(!(sync && self->tx_failures != saved_failures));
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 2, 4, espnow_send);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 3, 5, espnow_send);
 
 // ### The ESP_Now send and recv callback routines
 //
@@ -410,9 +415,10 @@ STATIC void recv_cb(
     header.magic = ESPNOW_MAGIC;
     header.msg_len = msg_len;
     #if MICROPY_ESPNOW_RSSI
-    header.rssi = _get_rssi_from_wifi_pkt(msg);
     header.time_ms = mp_hal_ticks_ms();
-    #endif // MICROPY_ESPNOW_RSSI
+    header.rssi = _get_rssi_from_wifi_pkt(msg);
+    printf("RSSI = %d (%u)\n", header.rssi, *(uint8_t *)&header.rssi);
+#endif // MICROPY_ESPNOW_RSSI
 
     ringbuf_write(buf, &header, sizeof(header));
     ringbuf_write(buf, mac_addr, ESP_NOW_ETH_ALEN);
@@ -622,9 +628,8 @@ STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_on_recv), MP_ROM_PTR(&espnow_on_recv_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&espnow_stats_obj) },
 
-    // Send and receive messages
+    // Send messages
     { MP_ROM_QSTR(MP_QSTR_send), MP_ROM_PTR(&espnow_send_obj) },
-    { MP_ROM_QSTR(MP_QSTR_any), MP_ROM_PTR(&espnow_any_obj) },
 
     // Peer management functions
     { MP_ROM_QSTR(MP_QSTR_set_pmk), MP_ROM_PTR(&espnow_set_pmk_obj) },

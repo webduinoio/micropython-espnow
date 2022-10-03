@@ -3,36 +3,70 @@
 
 from micropython import const, ringbuffer
 import array
+import time
 
 from _espnow import *
 
 EVENT_RECV_MSG = const(1)
+SEND_TIMEOUT_MS = const(2000)
 
 
 class ESPNow(ESPNow):
     # Static buffers for alloc free receipt of messages with ESPNow.irecv().
-    _hdr = array.array('B', b'\x00' * 7)
+    _hdr = array.array("B", b"\x00" * 7)
+    _mac = bytearray(ETH_ALEN)
     _message = bytearray(MAX_DATA_LEN)
-    _data = [bytearray(ETH_ALEN), None]
+    _data = [None, None]
     _none_tuple = (None, None)
+    _track_rssi = True
+    peers_table = {}
 
     def __init__(self):
         super().__init__()
-        self.buffer = ringbuffer(2 * MAX_PACKET_LEN)
+        self.config(buffer=ringbuffer(2 * MAX_PACKET_LEN))
 
     def recvinto(self, data, timeout):
         b = self.buffer
         if timeout is not None:
             b.settimeout(timeout)
-        n = b.readinto(self._hdr)
-        if (n != 7):
-            return 0 if n == 0 else -1
-        len = self._hdr[1]
-        if self._hdr[0] != MAGIC or len > 250:
+        hdr = self._hdr
+        n = b.readinto(hdr)
+        if not n or n != 7:
+            return 0 if not n else -1
+        len = hdr[1]
+        if hdr[0] != MAGIC or len > 250:
             raise OSError("Invalid buffer")
-        b.readinto(self._data[0])
-        b.readinto(self._message, len)
-        data[1] = self._message[:len]
+        mac, message = self._mac, self._message
+        b.readinto(mac)
+        b.readinto(message, len)
+        if self._track_rssi:
+            rssi = hdr[6]
+            if (rssi & 0x80):  # Two's complement
+                rssi = - ((~rssi) & 0x8f)
+            mac = bytes(mac)
+            x = self.peers_table.get(mac, None)
+            if not x:
+                x = list([0, 0])
+                self.peers_table[mac] = x
+            x[0], x[1] = rssi, time.ticks_ms()
+        data[0], data[1] = mac, message[:len]
+        return len
+
+    def send(self, mac, msg=None, sync=None):
+        if msg is None:
+            msg, mac = mac, None  # If msg is None: swap mac and msg
+        start = time.ticks_ms()
+        while True:  # Keep trying to send if the espnow send buffers are full
+            try:
+                return self.send(mac, msg, sync)
+            except OSError as err:
+                if len(err.args) < 2 or err.args[2] != "ESP_ERR_ESPNOW_NO_MEM":
+                    raise
+            if time.ticks_ms() - start > SEND_TIMEOUT_MS:
+                break
+
+    def any(self):
+        return self.buffer.any()
 
     def irecv(self, timeout=None):
         n = self.recvinto(self._data, timeout)
