@@ -194,8 +194,8 @@ soft_reset_exit:
     #endif
 
     #if MICROPY_ESPNOW
-    espnow_deinit(mp_const_none);
-    MP_STATE_PORT(espnow_singleton) = NULL;
+    espnow_deinit();
+    MP_STATE_PORT(espnow_root_pointers) = NULL;
     #endif
 
     machine_timer_deinit_all();
