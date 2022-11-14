@@ -355,6 +355,7 @@ static mp_map_elem_t *_lookup_add_peer(
         map->is_fixed = 0;      // Allow to modify the dict
         mp_obj_t new_peer = mp_obj_new_bytes(peer, ESP_NOW_ETH_ALEN);
         item = mp_map_lookup(map, new_peer, MP_MAP_LOOKUP_ADD_IF_NOT_FOUND);
+        item->value = mp_obj_new_list(2, NULL);
         map->is_fixed = 1;      // Relock the dict
     }
     return item;
@@ -368,13 +369,7 @@ static mp_map_elem_t *_update_rssi(
     esp_espnow_obj_t *self = _get_singleton_initialised();
     // Lookup the peer in the device table
     mp_map_elem_t *item = _lookup_add_peer(self, peer);
-    // Ensure the item value is a list with at least 2 entries
     mp_obj_list_t *list = MP_OBJ_TO_PTR(item->value);
-    if (list == NULL || list->len < 2) {
-        item->value = mp_obj_new_list(2,
-            (mp_obj_t [2]) {mp_const_none, mp_const_none});
-        list = MP_OBJ_TO_PTR(item->value);
-    }
     list->items[0] = MP_OBJ_NEW_SMALL_INT(rssi);
     list->items[1] = mp_obj_new_int(time_ms);
     return item;
@@ -481,8 +476,9 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
     }
 
     #if MICROPY_ESPNOW_RSSI
-    // Update rssi value in device table and set first element of list to peer
-    list->items[0] = _update_rssi(peer_buf, hdr.rssi, hdr.time_ms)->key;
+    // Update rssi value in the peer device table
+    mp_map_elem_t *entry = _update_rssi(peer_buf, hdr.rssi, hdr.time_ms);
+    list->items[0] = entry->key;  // Set first element of list to peer
     if (list->len >= 4) {
         list->items[2] = MP_OBJ_NEW_SMALL_INT(hdr.rssi);
         list->items[3] = mp_obj_new_int(hdr.time_ms);
