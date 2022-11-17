@@ -61,6 +61,7 @@
 #include "usb_serial_jtag.h"
 #include "modmachine.h"
 #include "modnetwork.h"
+#include "modesp32.h"
 #include "mpthreadport.h"
 
 #if MICROPY_BLUETOOTH_NIMBLE
@@ -89,6 +90,7 @@ int vprintf_null(const char *format, va_list ap) {
 
 void mp_task(void *pvParameter) {
     volatile uint32_t sp = (uint32_t)get_sp();
+    esp32_boot_trace();
     #if MICROPY_PY_THREAD
     mp_thread_init(pxTaskGetStackStart(NULL), MP_TASK_STACK_SIZE / sizeof(uintptr_t));
     #endif
@@ -146,12 +148,14 @@ void mp_task(void *pvParameter) {
         mp_task_heap_size = MIN(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), heap_total / 2);
         mp_task_heap = malloc(mp_task_heap_size);
     }
+    esp32_boot_trace();
 
 soft_reset:
     // initialise the stack pointer for the main thread
     mp_stack_set_top((void *)sp);
     mp_stack_set_limit(MP_TASK_STACK_SIZE - MP_TASK_STACK_LIMIT_MARGIN);
     gc_init(mp_task_heap, mp_task_heap + mp_task_heap_size);
+    esp32_boot_trace();
     mp_init();
     mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_lib));
     readline_init0();
@@ -164,6 +168,7 @@ soft_reset:
     machine_i2s_init0();
     #endif
 
+    esp32_boot_trace();
     // run boot-up scripts
     pyexec_frozen_module("_boot.py");
     pyexec_file_if_exists("boot.py");
@@ -241,9 +246,11 @@ void boardctrl_startup(void) {
 }
 
 void app_main(void) {
+    esp32_boot_trace();
     // Hook for a board to run code at start up.
     // This defaults to initialising NVS.
     MICROPY_BOARD_STARTUP();
+    esp32_boot_trace();
 
     // Create and transfer control to the MicroPython task.
     xTaskCreatePinnedToCore(mp_task, "mp_task", MP_TASK_STACK_SIZE / sizeof(StackType_t), NULL, MP_TASK_PRIORITY, &mp_main_task_handle, MP_TASK_COREID);
