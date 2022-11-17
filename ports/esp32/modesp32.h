@@ -68,4 +68,6 @@ extern const mp_obj_type_t esp32_ulp_type;
 
 esp_err_t rmt_driver_install_core1(uint8_t channel_id);
 
+void esp32_boot_trace();
+
 #endif // MICROPY_INCLUDED_ESP32_MODESP32_H

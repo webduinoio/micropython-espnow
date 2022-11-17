@@ -200,6 +200,60 @@ STATIC mp_obj_t esp32_idf_heap_info(const mp_obj_t cap_in) {
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_idf_heap_info_obj, esp32_idf_heap_info);
 
+// @glenn20: Support for tracing boot execution times for micropython.
+// Calls to esp32_boot_trace() will:
+//  - Issue a 100 microsecond pulse on BOOT_TRACE_PIN (pin 18) and
+//  - record the number of microseconds since boot in an internal array
+// This will add 200 microseconds delay for each call to esp32_boot_trace().
+//
+// The boot times array (in microseconds) may be accessed from micropython with:
+//
+//    import esp32
+//    print(esp32.boot_times())
+//
+
+#include "driver/gpio.h"
+
+static void busy_wait_us(uint32_t us) {
+    uint64_t t0 = esp_timer_get_time();
+    for (;;) {
+        uint64_t dt = esp_timer_get_time() - t0;
+        if (dt >= us) {
+            return;
+        }
+    }
+}
+
+#define BOOT_TRACE_PIN 18
+uint32_t boot_times[20];
+static int ntimes = 0;
+
+void esp32_boot_trace() {
+    if (ntimes == 0) {
+        gpio_pad_select_gpio(BOOT_TRACE_PIN);
+        gpio_set_level(BOOT_TRACE_PIN, 0);
+        gpio_set_direction(BOOT_TRACE_PIN, GPIO_MODE_OUTPUT);
+        gpio_set_level(BOOT_TRACE_PIN, 0);
+        busy_wait_us(1000);
+    }
+    if (ntimes < sizeof(boot_times)/sizeof(boot_times[0])) {
+        boot_times[ntimes++] = esp_timer_get_time();
+    }
+    gpio_set_level(BOOT_TRACE_PIN, 1);
+    busy_wait_us(100);
+    gpio_set_level(BOOT_TRACE_PIN, 0);
+    busy_wait_us(100);
+}
+
+STATIC mp_obj_t esp32_boot_times() {
+    mp_obj_tuple_t *tuple = mp_obj_new_tuple(ntimes, NULL);
+    for (int i = 0; i < ntimes; i++) {
+        tuple->items[i] = mp_obj_new_int(boot_times[i]);
+    }
+    return MP_OBJ_FROM_PTR(tuple);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(esp32_boot_times_obj, esp32_boot_times);
+
 STATIC const mp_rom_map_elem_t esp32_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_esp32) },
 
@@ -213,6 +267,7 @@ STATIC const mp_rom_map_elem_t esp32_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_hall_sensor), MP_ROM_PTR(&esp32_hall_sensor_obj) },
     #endif
     { MP_ROM_QSTR(MP_QSTR_idf_heap_info), MP_ROM_PTR(&esp32_idf_heap_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_boot_times), MP_ROM_PTR(&esp32_boot_times_obj) },
 
     { MP_ROM_QSTR(MP_QSTR_NVS), MP_ROM_PTR(&esp32_nvs_type) },
     { MP_ROM_QSTR(MP_QSTR_Partition), MP_ROM_PTR(&esp32_partition_type) },
