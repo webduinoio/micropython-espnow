@@ -135,7 +135,7 @@ void mp_task(void *pvParameter) {
     }
     #endif
 
-    if (mp_task_heap == NULL) {
+    if (mp_task_heap == NULL || esp_reset_reason() == ESP_RST_DEEPSLEEP) {
         // Allocate the uPy heap using malloc and get the largest available region,
         // limiting to 1/2 total available memory to leave memory for the OS.
         #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 1, 0)
