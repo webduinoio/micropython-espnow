@@ -1,3 +1,5 @@
+import _preboot
+
 import gc
 import uos
 from flashbdev import bdev
