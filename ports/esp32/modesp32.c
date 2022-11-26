@@ -34,6 +34,7 @@
 #include "driver/adc.h"
 #include "esp_heap_caps.h"
 #include "multi_heap.h"
+#include "esp_sleep.h"
 
 #include "py/nlr.h"
 #include "py/obj.h"
@@ -212,7 +213,104 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(esp32_idf_heap_info_obj, esp32_idf_heap_info);
 //    print(esp32.boot_times())
 //
 
-#include "driver/gpio.h"
+#if CONFIG_IDF_TARGET_ESP32
+#include "esp32/rom/rtc.h"
+#elif CONFIG_IDF_TARGET_ESP32S2
+#include "esp32s2/rom/rtc.h"
+#elif CONFIG_IDF_TARGET_ESP32S3
+#include "esp32s3/rom/rtc.h"
+#endif
+#include "hal/rtc_cntl_ll.h"
+#include "soc/timer_group_reg.h"
+
+// deepsleep_for_us() and esp_wake_deep_sleep() are executed before loading the
+// whole firmware image and can only call functions which are stored in ROM so,
+// we have to use the low-level register programming of the esp32XX devices. See
+// https://gist.github.com/igrr/54f7fbe0513ac14e1aea3fd7fbecfeab
+
+RTC_IRAM_ATTR void deepsleep_for_ms(uint32_t duration_us, uint32_t wake_mask) {
+    // Feed the system watchdog timer
+    REG_WRITE(TIMG_WDTFEED_REG(0), 1);
+
+    // Get current RTC time
+    SET_PERI_REG_MASK(RTC_CNTL_TIME_UPDATE_REG, RTC_CNTL_TIME_UPDATE);
+    #if CONFIG_IDF_TARGET_ESP32
+    while (GET_PERI_REG_MASK(RTC_CNTL_TIME_UPDATE_REG, RTC_CNTL_TIME_VALID) == 0) {
+        ets_delay_us(1);
+    }
+    SET_PERI_REG_MASK(RTC_CNTL_INT_CLR_REG, RTC_CNTL_TIME_VALID_INT_CLR);
+    #endif
+    uint64_t now = READ_PERI_REG(RTC_CNTL_TIME0_REG);
+    now |= ((uint64_t) READ_PERI_REG(RTC_CNTL_TIME1_REG)) << 32;
+
+    // Use the RTC calibration values
+    uint32_t period = REG_READ(RTC_SLOW_CLK_CAL_REG);
+    uint64_t rtc_count_delta = ((((uint64_t)duration_us) << RTC_CLK_CAL_FRACT) / period);
+
+    // Set the wakeup time - can be called as it is static inline (not in flash)
+    rtc_cntl_ll_set_wakeup_timer(now + rtc_count_delta);
+
+    // Enable wake from the RTC timer
+    REG_SET_FIELD(RTC_CNTL_WAKEUP_STATE_REG, RTC_CNTL_WAKEUP_ENA, RTC_TIMER_TRIG_EN | wake_mask);
+    // ??? Is this necessary ???
+    WRITE_PERI_REG(RTC_CNTL_SLP_REJECT_CONF_REG, 0); // Clear sleep rejection cause
+
+    // Set the wake stub so we execute on the next deepsleep wake.
+    // The ESP32-S3/C3 devices need special handling.
+    // From https://github.com/espressif/esp-idf/issues/8208#issuecomment-1110764199
+    #if SOC_PM_SUPPORT_DEEPSLEEP_VERIFY_STUB_ONLY
+    extern char _rtc_text_start[];
+    #if CONFIG_ESP32S3_RTCDATA_IN_FAST_MEM
+    extern char _rtc_noinit_end[];
+    size_t rtc_fast_length = (size_t)_rtc_noinit_end - (size_t)_rtc_text_start;
+    #else
+    extern char _rtc_force_fast_end[];
+    size_t rtc_fast_length = (size_t)_rtc_force_fast_end - (size_t)_rtc_text_start;
+    #endif // CONFIG_ESP32S3_RTCDATA_IN_FAST_MEM
+    // Please note, the entry address of stub code is a fixed address at `_rtc_text_start`.
+    esp_rom_set_rtc_wake_addr((esp_rom_wake_func_t)_rtc_text_start, rtc_fast_length);
+    #else
+    // Set the pointer of the wake stub function.
+    REG_WRITE(RTC_ENTRY_ADDR_REG, (uint32_t)&esp_wake_deep_sleep);
+    set_rtc_memory_crc();
+    #endif // SOC_PM_SUPPORT_DEEPSLEEP_CHECK_STUB_MEM
+
+    // Go to sleep
+    CLEAR_PERI_REG_MASK(RTC_CNTL_STATE0_REG, RTC_CNTL_SLEEP_EN);
+    SET_PERI_REG_MASK(RTC_CNTL_STATE0_REG, RTC_CNTL_SLEEP_EN);
+    // A few CPU cycles may be necessary for the sleep to start...
+    while (true) {
+        ;
+    }
+    // never reaches here.
+}
+
+RTC_DATA_ATTR uint32_t deepsleep_wake_count = 0;
+RTC_DATA_ATTR uint32_t deepsleep_wake_count_period = 5;
+RTC_DATA_ATTR uint32_t deepsleep_wake_timeout_us = 500 * 1000;
+
+#ifdef CONFIG_IDF_TARGET_ESP32
+#define WAKE_CAUSE_REG RTC_CNTL_WAKEUP_STATE_REG
+#else
+#define WAKE_CAUSE_REG RTC_CNTL_SLP_WAKEUP_CAUSE_REG
+#endif // CONFIG_IDF_TARGET_ESP32
+
+
+void RTC_IRAM_ATTR esp_wake_deep_sleep(void) {
+    esp_default_wake_deep_sleep();
+    // uint32_t wakeup_cause = REG_GET_FIELD(WAKE_CAUSE_REG, RTC_CNTL_WAKEUP_CAUSE);
+    // if (wakeup_cause & RTC_TIMER_TRIG_EN) {
+    // } else if (wakeup_cause & RTC_EXT0_TRIG_EN) {
+    //     return;
+    // } else if (wakeup_cause & RTC_EXT1_TRIG_EN) {
+    //     return;
+    // }
+    if ((++deepsleep_wake_count % deepsleep_wake_count_period) == 0) {
+        // Do a full boot-up every deepsleep_wake_count_period times.
+        return;
+    }
+    deepsleep_for_ms(deepsleep_wake_timeout_us, 0);
+}
 
 static void busy_wait_us(uint32_t us) {
     uint64_t t0 = esp_timer_get_time();
