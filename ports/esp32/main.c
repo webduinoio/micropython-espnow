@@ -90,7 +90,6 @@ int vprintf_null(const char *format, va_list ap) {
 
 void mp_task(void *pvParameter) {
     volatile uint32_t sp = (uint32_t)get_sp();
-    esp32_boot_trace();
     #if MICROPY_PY_THREAD
     mp_thread_init(pxTaskGetStackStart(NULL), MP_TASK_STACK_SIZE / sizeof(uintptr_t));
     #endif
@@ -148,14 +147,12 @@ void mp_task(void *pvParameter) {
         mp_task_heap_size = MIN(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), heap_total / 2);
         mp_task_heap = malloc(mp_task_heap_size);
     }
-    esp32_boot_trace();
 
 soft_reset:
     // initialise the stack pointer for the main thread
     mp_stack_set_top((void *)sp);
     mp_stack_set_limit(MP_TASK_STACK_SIZE - MP_TASK_STACK_LIMIT_MARGIN);
     gc_init(mp_task_heap, mp_task_heap + mp_task_heap_size);
-    esp32_boot_trace();
     mp_init();
     mp_obj_list_append(mp_sys_path, MP_OBJ_NEW_QSTR(MP_QSTR__slash_lib));
     readline_init0();
@@ -168,9 +165,10 @@ soft_reset:
     machine_i2s_init0();
     #endif
 
-    esp32_boot_trace();
     // run boot-up scripts
+    esp32_boot_trace();
     pyexec_frozen_module("_boot.py");
+    esp32_boot_trace();
     pyexec_file_if_exists("boot.py");
     if (pyexec_mode_kind == PYEXEC_MODE_FRIENDLY_REPL) {
         int ret = pyexec_file_if_exists("main.py");
@@ -238,9 +236,9 @@ soft_reset_exit:
 }
 
 void boardctrl_startup(void) {
-    if (esp_reset_reason() == ESP_RST_DEEPSLEEP) {
-        return;
-    }
+    // if (esp_reset_reason() == ESP_RST_DEEPSLEEP) {
+    //     return;
+    // }
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         nvs_flash_erase();
@@ -253,7 +251,6 @@ void app_main(void) {
     // Hook for a board to run code at start up.
     // This defaults to initialising NVS.
     MICROPY_BOARD_STARTUP();
-    esp32_boot_trace();
 
     // Create and transfer control to the MicroPython task.
     xTaskCreatePinnedToCore(mp_task, "mp_task", MP_TASK_STACK_SIZE / sizeof(StackType_t), NULL, MP_TASK_PRIORITY, &mp_main_task_handle, MP_TASK_COREID);
