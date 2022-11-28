@@ -99,7 +99,8 @@ static const size_t DEFAULT_SEND_TIMEOUT_MS = (2 * 1000);
 
 // Number of milliseconds to wait for pending responses to sent packets.
 // This is a fallback which should never be reached.
-static const size_t PENDING_RESPONSES_TIMEOUT_MS = 250;
+static const size_t PENDING_RESPONSES_TIMEOUT_MS = 100;
+static const size_t PENDING_RESPONSES_BUSY_POLL_MS = 10;
 
 // The data structure for the espnow_singleton.
 typedef struct _esp_espnow_obj_t {
@@ -503,14 +504,17 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_any_obj, espnow_any);
 // Return the number of responses where status != ESP_NOW_SEND_SUCCESS.
 static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
     int64_t start = mp_hal_ticks_ms();
-    while (self->tx_responses < self->tx_packets) {
-        if (mp_hal_ticks_ms() - start > PENDING_RESPONSES_TIMEOUT_MS) {
-            // Note: the loop timeout is just a fallback - in normal operation
-            // we should never reach that timeout.
-            mp_raise_ValueError(MP_ERROR_TEXT("Send timeout on synch."));
+    int64_t t;
+    while ((t = mp_hal_ticks_ms() - start) < PENDING_RESPONSES_TIMEOUT_MS) {
+        if (self->tx_responses >= self->tx_packets) {
+            return;
         }
-        MICROPY_EVENT_POLL_HOOK;
+        if (t > PENDING_RESPONSES_BUSY_POLL_MS) {
+            // After 10ms of busy waiting give other tasks a look in.
+            MICROPY_EVENT_POLL_HOOK;
+        }
     }
+    mp_raise_OSError(MP_ETIMEDOUT);
 }
 
 // ESPNow.send(peer_addr, message, [sync (=true), size])
