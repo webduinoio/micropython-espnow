@@ -1,4 +1,4 @@
-import _preboot_mqtt
+import _preboot_deepsleep
 
 import gc
 import uos
