@@ -4,6 +4,7 @@
 import uasyncio
 import espnow
 
+
 # Modelled on the uasyncio.Stream class (extmod/stream/stream.py)
 # NOTE: Relies on internal implementation of uasyncio.core (_io_queue)
 class AIOESPNow(espnow.ESPNow):
