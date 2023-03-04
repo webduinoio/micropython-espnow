@@ -68,7 +68,7 @@
 #endif
 
 #if MICROPY_ESPNOW
-#include "esp_espnow.h"
+#include "modespnow.h"
 #endif
 
 // MicroPython runs as a task under FreeRTOS
@@ -189,6 +189,7 @@ soft_reset:
     }
 
 soft_reset_exit:
+
     #if MICROPY_BLUETOOTH_NIMBLE
     mp_bluetooth_deinit();
     #endif

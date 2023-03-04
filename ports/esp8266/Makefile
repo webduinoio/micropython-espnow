@@ -48,12 +48,6 @@ FLASH_SIZE ?= detect
 CROSS_COMPILE ?= xtensa-lx106-elf-
 ESP_SDK = $(shell $(CC) -print-sysroot)/usr
 
-# Support ESPNOW by default on the ESP8266
-MICROPY_ESPNOW ?= 1
-ifeq ($(MICROPY_ESPNOW),1)
-CFLAGS_MOD += -DMICROPY_ESPNOW=1
-endif
-
 INC += -I.
 INC += -I$(TOP)
 INC += -I$(BUILD)
@@ -77,6 +71,7 @@ LDFLAGS += -nostdlib -T $(LD_FILES) -Map=$(@:.elf=.map) --cref
 LIBS += -L$(ESP_SDK)/lib -lmain -ljson -llwip_open -lpp -lnet80211 -lwpa -lphy -lnet80211
 
 ifeq ($(MICROPY_ESPNOW),1)
+CFLAGS += -DMICROPY_ESPNOW=1
 LIBS += -lespnow
 endif
 
@@ -125,7 +120,7 @@ SRC_C = \
 
 ifeq ($(MICROPY_ESPNOW),1)
 SRC_C += \
-	esp_espnow.c
+	modespnow.c
 endif
 
 LIB_SRC_C = $(addprefix lib/,\

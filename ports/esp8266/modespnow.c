@@ -49,7 +49,7 @@
 
 #include "mpconfigport.h"
 
-#include "esp_espnow.h"
+#include "modespnow.h"
 
 // For the esp8266
 #define ESP_NOW_MAX_DATA_LEN (250)

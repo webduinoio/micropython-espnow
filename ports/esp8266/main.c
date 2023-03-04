@@ -46,7 +46,7 @@
 #include "user_interface.h"
 
 #if MICROPY_ESPNOW
-#include "esp_espnow.h"
+#include "modespnow.h"
 #endif
 
 STATIC char heap[38 * 1024];
