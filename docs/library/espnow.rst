@@ -165,19 +165,21 @@ Configuration
 
     .. data:: Options:
 
-        ``rxbuf``: *(default=516)* Get/set the size in bytes of the internal
+        ``rxbuf``: *(default=526)* Get/set the size in bytes of the internal
         buffer used to store incoming ESPNow packet data. The default size is
-        selected to fit two max-sized ESPNow packets (250 bytes) with
-        associated mac_address (6 bytes) and a message byte count (1 byte)
-        plus buffer overhead. Increase this if you expect to receive a lot of
-        large packets or expect bursty incoming traffic.
+        selected to fit two max-sized ESPNow packets (250 bytes) with associated
+        mac_address (6 bytes), a message byte count (1 byte) and RSSI data plus
+        buffer overhead. Increase this if you expect to receive a lot of large
+        packets or expect bursty incoming traffic.
 
         **Note:** The recv buffer is allocated by `ESPNow.active()`. Changing
         this value will have no effect until the next call of
         `ESPNow.active(True)<ESPNow.active()>`.
 
-        ``timeout``: *(default=300,000)* Default read timeout (in milliseconds).
-        The timeout can also be provided as arg to `recvinto()`.
+        ``timeout``: *(default=300,000)* Default timeout (in milliseconds) for
+        receiving ESPNOW messages. If ``timeout`` is less than zero, then wait
+        forever. The timeout can also be provided as arg to
+        `recv()`/`irecv()`/`recvinto()`.
 
         ``rate``: (ESP32 only, IDF>=4.3.0 only) Set the transmission speed for
         espnow packets. Must be set to a number from the allowed numeric values

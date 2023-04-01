@@ -108,7 +108,7 @@ typedef struct _esp_espnow_obj_t {
 
     ringbuf_t *recv_buffer;         // A buffer for received packets
     size_t recv_buffer_size;        // The size of the recv_buffer
-    size_t recv_timeout_ms;         // Timeout for recv()
+    mp_int_t recv_timeout_ms;         // Timeout for recv()
     volatile size_t rx_packets;     // # of received packets
     size_t dropped_rx_pkts;         // # of dropped packets (buffer full)
     size_t tx_packets;              // # of sent packets
@@ -242,7 +242,7 @@ STATIC mp_obj_t espnow_config(
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_buffer, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
-        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = INT_MIN} },
         { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -252,7 +252,7 @@ STATIC mp_obj_t espnow_config(
     if (args[ARG_buffer].u_int >= 0) {
         self->recv_buffer_size = args[ARG_buffer].u_int;
     }
-    if (args[ARG_timeout].u_int >= 0) {
+    if (args[ARG_timeout].u_int != INT_MIN) {
         self->recv_timeout_ms = args[ARG_timeout].u_int;
     }
     if (args[ARG_rate].u_int >= 0) {
@@ -411,12 +411,12 @@ static const uint8_t *_get_peer(mp_obj_t mac_addr) {
 }
 
 // Copy data from the ring buffer - wait if buffer is empty up to timeout_ms
-int ringbuf_read_wait(ringbuf_t *r, void *data, size_t len, int timeout_ms) {
-    int64_t end = mp_hal_ticks_ms() + timeout_ms;
+int ringbuf_read_wait(ringbuf_t *r, void *data, size_t len, mp_int_t timeout_ms) {
+    int64_t end = (int64_t)mp_hal_ticks_ms() + timeout_ms;
     int status = 0;
     while (
         ((status = ringbuf_read(r, data, len)) == 0) &&
-        (end - (int64_t)mp_hal_ticks_ms()) >= 0) {
+        (timeout_ms < 0 || (end - (int64_t)mp_hal_ticks_ms()) > 0)) {
         MICROPY_EVENT_POLL_HOOK;
     }
     return status;
@@ -436,7 +436,7 @@ int ringbuf_read_wait(ringbuf_t *r, void *data, size_t len, int timeout_ms) {
 STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton_initialised();
 
-    size_t timeout_ms = ((n_args > 2 && args[2] != mp_const_none)
+    mp_int_t timeout_ms = ((n_args > 2 && args[2] != mp_const_none)
             ? mp_obj_get_int(args[2]) : self->recv_timeout_ms);
 
     mp_obj_list_t *list = MP_OBJ_TO_PTR(args[1]);
