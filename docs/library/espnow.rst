@@ -83,7 +83,7 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     e.send("Starting...")       # Send to all peers
     for i in range(100):
         e.send(peer, str(i)*20, True)
-        e.send(b'end')
+        e.send(peer, b'end')
 
 **Receiver:** ::
 
@@ -356,7 +356,7 @@ receiving ESP-NOW messages. You can avoid this by calling
     - It is unnecessary to provide a bytearray in the first element of the
       ``data`` list because it will be replaced by a reference to a unique
       ``peer`` address in the **peer device table** (see `ESPNow.peers_table`).
-    - If the list is at latest 4 elements long, the rssi and timestamp values
+    - If the list is at least 4 elements long, the rssi and timestamp values
       will be saved as the 3rd and 4th elements.
 
 .. method:: ESPNow.any()
@@ -613,9 +613,9 @@ Wifi Signal Strength (RSSI) - (ESP32 only)
 ------------------------------------------
 
 The ESPNow object maintains a **peer device table** which contains the signal
-strength of the last received message for all known peers. The **peer device
-table** can be accessed using `ESPNow.peers_table` and can be used to track
-device proximity and identify *nearest neighbours* in a network of peer
+strength and timestamp of the last received message from all hosts. The **peer
+device table** can be accessed using `ESPNow.peers_table` and can be used to
+track device proximity and identify *nearest neighbours* in a network of peer
 devices. This feature is **not** available on ESP8266 devices.
 
 .. data:: ESPNow.peers_table
