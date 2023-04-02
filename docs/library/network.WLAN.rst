@@ -133,4 +133,18 @@ Methods
    hostname       The hostname that will be sent to DHCP (STA interfaces) and mDNS (if supported, both STA and AP). (Deprecated, use :func:`network.hostname` instead)
    reconnects     Number of reconnect attempts to make (integer, 0=none, -1=unlimited)
    txpower        Maximum transmit power in dBm (integer or float)
+   pm             WiFi Power Management setting (see below for allowed values)
    =============  ===========
+
+Constants
+---------
+
+.. data:: WLAN.PM_NONE
+        WLAN.PM_MIN_MODEM
+        WLAN.PM_MAX_MODEM
+        WLAN.PM_LIGHT_SLEEP  (``esp8266 only``)
+
+    Allowed values for the ``WLAN.config(pm=...)`` network interface parameter.
+    ``PM_NONE``, ``PM_MIN_MODEM`` and ``PM_MAX_MODEM`` are supported on the
+    esp32 and esp8266 ports. ``PM_LIGHT_SLEEP`` is supported on the esp8266
+    port.
