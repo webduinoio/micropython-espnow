@@ -579,7 +579,7 @@ Constants
 
 .. data:: espnow.MAX_DATA_LEN(=250)
           espnow.KEY_LEN(=16)
-          espnow.ETH_ALEN(=6)
+          espnow.ADDR_LEN(=6)
           espnow.MAX_TOTAL_PEER_NUM(=20)
           espnow.MAX_ENCRYPT_PEER_NUM(=6)
           espnow.EVENT_RECV_MSG(=1)

@@ -83,7 +83,7 @@ def instance1():
     print("RECVINTO() test...")
     msg = bytes([random.getrandbits(8) for _ in range(12)])
     client_send(e, peer, msg, True)
-    data = [bytearray(espnow.ETH_ALEN), bytearray(espnow.MAX_DATA_LEN)]
+    data = [bytearray(espnow.ADDR_LEN), bytearray(espnow.MAX_DATA_LEN)]
     n = e.recvinto(data)
     print("OK" if data[1] == msg else "ERROR: Received != Sent")
 
