@@ -285,9 +285,9 @@ STATIC mp_obj_t espnow_config(
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(espnow_config_obj, 1, espnow_config);
 
-// ESPNow.on_recv(recv_cb)
+// ESPNow.irq(recv_cb)
 // Set callback function to be invoked when a message is received.
-STATIC mp_obj_t espnow_on_recv(size_t n_args, const mp_obj_t *args) {
+STATIC mp_obj_t espnow_irq(size_t n_args, const mp_obj_t *args) {
     esp_espnow_obj_t *self = _get_singleton();
     mp_obj_t recv_cb = args[1];
     if (recv_cb != mp_const_none && !mp_obj_is_callable(recv_cb)) {
@@ -297,7 +297,7 @@ STATIC mp_obj_t espnow_on_recv(size_t n_args, const mp_obj_t *args) {
     self->recv_cb_arg = (n_args > 2) ? args[2] : mp_const_none;
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_on_recv_obj, 2, 3, espnow_on_recv);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_irq_obj, 2, 3, espnow_irq);
 
 // ESPnow.stats(): Provide some useful stats.
 // Returns a tuple of:
@@ -811,7 +811,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(espnow_peer_count_obj, espnow_peer_count);
 STATIC const mp_rom_map_elem_t esp_espnow_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_active), MP_ROM_PTR(&espnow_active_obj) },
     { MP_ROM_QSTR(MP_QSTR_config), MP_ROM_PTR(&espnow_config_obj) },
-    { MP_ROM_QSTR(MP_QSTR_on_recv), MP_ROM_PTR(&espnow_on_recv_obj) },
+    { MP_ROM_QSTR(MP_QSTR_irq), MP_ROM_PTR(&espnow_irq_obj) },
     { MP_ROM_QSTR(MP_QSTR_stats), MP_ROM_PTR(&espnow_stats_obj) },
 
     // Send and receive messages

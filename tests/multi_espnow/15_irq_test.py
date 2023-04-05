@@ -80,7 +80,7 @@ def instance1():
     # Instance 1 (the client)
     e = init(True, False)
     try:
-        e.on_recv(None)
+        e.irq(None)
     except AttributeError:
         print("SKIP")
         raise SystemExit
@@ -96,30 +96,18 @@ def instance1():
         print("OK" if msg2 == msg else "ERROR: Received != Sent")
         done = True
 
-    def irq_cb(code, data):
-        global done
-        p2, msg2 = data
-        if code != espnow.EVENT_RECV_MSG:
-            print("Error in irq_cb(): Unexpected value of code:", code)
-        print("OK" if p2 == peer and msg2 == msg else "ERROR: Received != Sent")
-        done = True
-
     global done
-    print("ON_RECV() test...")
-    e.on_recv(on_recv_cb)
-    for i in range(2):
-        done = False
-        msg = bytes([random.getrandbits(8) for _ in range(12)])
-        client_send(e, peer, msg, True)
-        start = time.ticks_ms()
-        while not done:
-            if time.ticks_ms() - start > timeout:
-                print("Timeout waiting for response.")
-                raise SystemExit
-        e.irq(irq_cb)
-        if i == 0:
-            print("IRQ() test...")
-    e.on_recv(None)
+    print("IRQ() test...")
+    e.irq(on_recv_cb)
+    done = False
+    msg = bytes([random.getrandbits(8) for _ in range(12)])
+    client_send(e, peer, msg, True)
+    start = time.ticks_ms()
+    while not done:
+        if time.ticks_ms() - start > timeout:
+            print("Timeout waiting for response.")
+            raise SystemExit
+    e.irq(None)
 
     # Tell the server to stop
     print("DONE")
