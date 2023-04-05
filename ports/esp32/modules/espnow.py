@@ -31,10 +31,3 @@ class ESPNow(ESPNow):
 
     def __next__(self):
         return self.irecv()  # Use alloc free irecv() method
-
-    # Backward compatibility with pre-release API
-    def init(self):
-        self.active(True)
-
-    def deinit(self):
-        self.active(False)

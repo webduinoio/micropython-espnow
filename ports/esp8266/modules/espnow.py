@@ -35,10 +35,3 @@ class ESPNow(ESPNow):
             return True
         except StopIteration:
             return False
-
-    # Backward compatibility with pre-release API
-    def init(self):
-        self.active(True)
-
-    def deinit(self):
-        self.active(False)
