@@ -834,7 +834,7 @@ STATIC MP_DEFINE_CONST_DICT(esp_espnow_locals_dict, esp_espnow_locals_dict_table
 
 STATIC const mp_rom_map_elem_t espnow_globals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__espnow) },
-    { MP_ROM_QSTR(MP_QSTR_ESPNow), MP_ROM_PTR(&esp_espnow_type) },
+    { MP_ROM_QSTR(MP_QSTR_ESPNowBase), MP_ROM_PTR(&esp_espnow_type) },
     { MP_ROM_QSTR(MP_QSTR_MAX_DATA_LEN), MP_ROM_INT(ESP_NOW_MAX_DATA_LEN)},
     { MP_ROM_QSTR(MP_QSTR_ADDR_LEN), MP_ROM_INT(ESP_NOW_ETH_ALEN)},
     { MP_ROM_QSTR(MP_QSTR_KEY_LEN), MP_ROM_INT(ESP_NOW_KEY_LEN)},
@@ -889,7 +889,7 @@ STATIC void espnow_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
 
 MP_DEFINE_CONST_OBJ_TYPE(
     esp_espnow_type,
-    MP_QSTR_ESPNow,
+    MP_QSTR_ESPNowBase,
     MP_TYPE_FLAG_NONE,
     make_new, espnow_make_new,
     #if MICROPY_ESPNOW_RSSI
