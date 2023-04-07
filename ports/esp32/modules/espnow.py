@@ -1,13 +1,10 @@
 # espnow module for MicroPython on ESP32
 # MIT license; Copyright (c) 2022 Glenn Moloney @glenn20
 
-from micropython import const
 from _espnow import *
 
-EVENT_RECV_MSG = const(1)
 
-
-class ESPNow(ESPNow):
+class ESPNow(ESPNowBase):
     # Static buffers for alloc free receipt of messages with ESPNow.irecv().
     _data = [None, bytearray(MAX_DATA_LEN)]
     _none_tuple = (None, None)

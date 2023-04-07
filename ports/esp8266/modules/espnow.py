@@ -5,7 +5,7 @@ from _espnow import *
 from uselect import poll, POLLIN
 
 
-class ESPNow(ESPNow):
+class ESPNow(ESPNowBase):
     # Static buffers for alloc free receipt of messages with ESPNow.irecv().
     _data = [bytearray(ADDR_LEN), bytearray(MAX_DATA_LEN)]
     _none_tuple = (None, None)
