@@ -1,5 +1,5 @@
-:mod:`espnow` --- Support for the ESP-NOW protocol
-==================================================
+:mod:`espnow` --- support for the ESP-NOW wireless protocol
+===========================================================
 
 .. module:: espnow
     :synopsis: ESP-NOW wireless protocol support
@@ -8,21 +8,6 @@ This module provides an interface to the `ESP-NOW <https://www.espressif.com/
 en/products/software/esp-now/overview>`_ protocol provided by Espressif on
 ESP32 and ESP8266 devices (`API docs <https://docs.espressif.com/
 projects/esp-idf/en/latest/api-reference/network/esp_now.html>`_).
-
-.. note::
-  This module is still under development and its classes, functions, methods
-  and constants are subject to change. This module is not yet included in the
-  main branch of micropython. Until such a time that the code is accepted into
-  the micropython main branch, the following resources are available:
-  `Source code
-  <https://github.com/glenn20/micropython/tree/espnow-g20>`_ |
-  `Pre-compiled images
-  <https://github.com/glenn20/micropython-espnow-images>`_ |
-  `Pull request (PR#6515)
-  <https://github.com/micropython/micropython/pull/6515>`_.
-  Please post issues
-  `on the micropython ESPNow Issues page
-  <https://github.com/glenn20/micropython/issues>`_.
 
 Table of Contents:
 ------------------
@@ -60,10 +45,10 @@ It is especially useful for small IoT networks, latency sensitive or power
 sensitive applications (such as battery operated devices) and for long-range
 communication between devices (hundreds of metres).
 
-This module also support tracking the Wifi signal strength (RSSI) of peer
+This module also supports tracking the Wifi signal strength (RSSI) of peer
 devices.
 
-Load this module from the :doc:`esp<esp>` module. A simple example would be:
+A simple example would be:
 
 **Sender:** ::
 
@@ -73,17 +58,17 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
     # A WLAN interface must be active to send()/recv()
     sta = network.WLAN(network.STA_IF)  # Or network.AP_IF
     sta.active(True)
-    sta.disconnect()   # For ESP8266
+    sta.disconnect()      # For ESP8266
 
     e = espnow.ESPNow()
     e.active(True)
     peer = b'\xbb\xbb\xbb\xbb\xbb\xbb'   # MAC address of peer's wifi interface
-    e.add_peer(peer)
+    e.add_peer(peer)      # Must add_peer() before send()
 
-    e.send("Starting...")       # Send to all peers
+    e.send(peer, "Starting...")
     for i in range(100):
         e.send(peer, str(i)*20, True)
-        e.send(peer, b'end')
+    e.send(peer, b'end')
 
 **Receiver:** ::
 
@@ -97,8 +82,6 @@ Load this module from the :doc:`esp<esp>` module. A simple example would be:
 
     e = espnow.ESPNow()
     e.active(True)
-    peer = b'\xaa\xaa\xaa\xaa\xaa\xaa'   # MAC address of peer's wifi interface
-    e.add_peer(peer)
 
     while True:
         host, msg = e.recv()
@@ -211,9 +194,9 @@ For example::
     sta.disconnect()    # For ESP8266
 
 **Note:** The ESP8266 has a *feature* that causes it to automatically reconnect
-to the last wifi Access Point when set `active(True)<network.WLAN.active>`
-(even after reboot/reset). As noted below, this reduces the reliability of
-receiving ESP-NOW messages. You can avoid this by calling
+to the last wifi Access Point when set `active(True)<network.WLAN.active>` (even
+after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
+(see `ESPNow and Wifi Operation`_). You can avoid this by calling
 `disconnect()<network.WLAN.disconnect>` after
 `active(True)<network.WLAN.active>`.
 
@@ -227,11 +210,12 @@ receiving ESP-NOW messages. You can avoid this by calling
 
     .. data:: Arguments:
 
-      - ``mac``: byte string exactly 6 bytes long or ``None``. If ``mac`` is
-        ``None`` (ESP32 only) the message will be sent to all registered peers,
-        except any broadcast or multicast MAC addresses.
+      - ``mac``: byte string exactly ``espnow.ADDR_LEN`` (6 bytes) long or
+        ``None``. If ``mac`` is ``None`` (ESP32 only) the message will be sent
+        to all registered peers, except any broadcast or multicast MAC
+        addresses.
 
-      - ``msg``: string or byte-string up to ``ESPNow.MAX_DATA_LEN`` (250)
+      - ``msg``: string or byte-string up to ``espnow.MAX_DATA_LEN`` (250)
         bytes long.
 
       - ``sync``:
@@ -438,7 +422,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
           transfers with this peer (unless the *encrypt* parameter is set to
           *False*). Must be:
 
-          - a byte-string or bytearray of string of length ``espnow.KEY_LEN``
+          - a byte-string or bytearray or string of length ``espnow.KEY_LEN``
             (16 bytes), or
 
           - any non ``True`` python value (default= ``b''``), signifying an
@@ -532,7 +516,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 Callback Methods
 ----------------
 
-.. method:: ESPNow.on_recv(recv_cb[, arg=None]) (ESP32 only)
+.. method:: ESPNow.irq(callback[, arg=None]) (ESP32 only)
 
   Set a callback function to be called *as soon as possible* after a message has
   been received from another ESPNow device. The function will be called with
@@ -540,29 +524,11 @@ Callback Methods
 
           def recv_cb(e):
               print(e.irecv(0))
-          e.on_recv(recv_cb, e)
+          e.irq(recv_cb, e)
 
-.. method:: ESPNow.irq(irq_cb) (ESP32 only)
-
-  Set a callback function to be called *as soon as possible* after a message has
-  been received from another ESPNow device. The function will be called with
-  `espnow.EVENT_RECV_MSG` as the first argument and a list of the peer and
-  received message as the second argument, eg: ::
-
-          def irq_cb(code, data):
-              if code == espnow.EVENT_RECV_MSG:
-                  peer, msg = data
-                  print(peer, msg)
-          e.irq(irq_cb)
-
-  **Note:** `irq()<ESPNow.irq()>` and `on_recv()<ESPNow.on_recv()>` will each
-  replace the current callback function, so only one of these methods will be
-  active at any given time.
-
-  The `on_recv()<ESPNow.on_recv()>` and `irq()<ESPNow.irq()>` callback methods
-  are an alternative method for processing incoming espnow messages, especially
-  if the data rate is moderate and the device is *not too busy* but there are
-  some caveats:
+  The `irq()<ESPNow.irq()>` callback method is an alternative method for
+  processing incoming espnow messages, especially if the data rate is moderate
+  and the device is *not too busy* but there are some caveats:
 
   - The scheduler stack *can* easily overflow and callbacks will be missed if
     packets are arriving at a sufficient rate or if other micropython components
@@ -582,7 +548,6 @@ Constants
           espnow.ADDR_LEN(=6)
           espnow.MAX_TOTAL_PEER_NUM(=20)
           espnow.MAX_ENCRYPT_PEER_NUM(=6)
-          espnow.EVENT_RECV_MSG(=1)
 
 Exceptions
 ----------
@@ -733,19 +698,6 @@ A small async server example::
                 break
       asyncio.run(recv_till_halt(e))
 
-.. function:: ESPNow()
-
-    Return an `AIOESPNow` object. This is a convenience function for adding
-    async support to existing non-async code, eg: ::
-
-      import network
-      # import espnow
-      import aioespnow as espnow
-
-      e = espnow.ESPNow()  # Returns an AIOESPNow object
-      e.active(True)
-      ...
-
 Broadcast and Multicast
 -----------------------
 
@@ -874,9 +826,7 @@ Other issues to take care with when using ESPNow with wifi are:
     sta, ap = wifi_reset()
 
   Remember that a soft reset occurs every time you connect to the device repl
-  and when you type ``ctrl-D``. See `Issue 9004
-  <https://github.com/micropython/micropython/issues/8994>`_ for more
-  information.
+  and when you type ``ctrl-D``.
 
 - **STA_IF and AP_IF always operate on the same channel:** the AP_IF wil change
   channel when you connect to a wifi network; regardless of the channel you set
