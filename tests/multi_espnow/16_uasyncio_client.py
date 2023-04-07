@@ -49,9 +49,8 @@ def client_send(e, peer, msg, sync):
     print("OK")
 
 
-def init(sta_active=True, ap_active=False):
+def init(e, sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
-    e = espnow.ESPNow()
     e.active(True)
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
@@ -71,7 +70,8 @@ def poll(e):
 
 # Server
 def instance0():
-    e = init(True, False)
+    e = espnow.ESPNow()
+    init(e, True, False)
     multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
     multitest.next()
     print("Server Start")
@@ -90,7 +90,8 @@ try:
     async def client():
         from aioespnow import AIOESPNow
 
-        e = AIOESPNow(init(True, False))
+        e = AIOESPNow()
+        init(e, True, False)
         e.config(timeout=timeout)
         peer = PEERS[0]
         e.add_peer(peer)

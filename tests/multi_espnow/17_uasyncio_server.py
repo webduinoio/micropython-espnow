@@ -29,9 +29,8 @@ def client_send(e, peer, msg, sync):
         return
 
 
-def init(sta_active=True, ap_active=False):
+def init(e, sta_active=True, ap_active=False):
     wlans = [network.WLAN(i) for i in [network.STA_IF, network.AP_IF]]
-    e = espnow.ESPNow()
     e.active(True)
     e.set_pmk(default_pmk)
     wlans[0].active(sta_active)
@@ -65,11 +64,12 @@ try:
                 return
 
     def instance0():
-        e = init(True, False)
+        e = AIOESPNow()
+        init(e, True, False)
         multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
         multitest.next()
         print("Server Start")
-        asyncio.run(echo_server(AIOESPNow(e)))
+        asyncio.run(echo_server(e))
         print("Server Done")
         e.active(False)
 
@@ -78,7 +78,8 @@ except:
 
 
 def instance1():
-    e = init(True, False)
+    e = espnow.ESPNow()
+    init(e, True, False)
     peer = PEERS[0]
     e.add_peer(peer)
     multitest.next()
