@@ -86,10 +86,9 @@ def instance1():
 
 try:
     import uasyncio as asyncio
+    from aioespnow import AIOESPNow
 
     async def client():
-        from aioespnow import AIOESPNow
-
         e = AIOESPNow()
         init(e, True, False)
         e.config(timeout=timeout)
