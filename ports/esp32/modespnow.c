@@ -97,6 +97,9 @@ static const size_t DEFAULT_RECV_TIMEOUT_MS = (5 * 60 * 1000);
 // Time to wait (millisec) for responses from sent packets: (2 seconds).
 static const size_t DEFAULT_SEND_TIMEOUT_MS = (2 * 1000);
 
+// Enable RSSI tracking by default
+static const bool DEFAULT_ENABLE_RSSI = true;
+
 // Number of milliseconds to wait for pending responses to sent packets.
 // This is a fallback which should never be reached.
 static const mp_uint_t PENDING_RESPONSES_TIMEOUT_MS = 100;
@@ -118,6 +121,7 @@ typedef struct _esp_espnow_obj_t {
     mp_obj_t recv_cb;               // Callback when a packet is received
     mp_obj_t recv_cb_arg;           // Argument passed to callback
     #if MICROPY_ESPNOW_RSSI
+    bool enable_rssi;              // Enable/disable the RSSI monitoring
     mp_obj_t peers_table;           // A dictionary of discovered peers
     #endif // MICROPY_ESPNOW_RSSI
 } esp_espnow_obj_t;
@@ -165,6 +169,7 @@ STATIC mp_obj_t espnow_make_new(const mp_obj_type_t *type, size_t n_args,
     self->recv_buffer = NULL;       // Buffer is allocated in espnow_init()
     self->recv_cb = mp_const_none;
     #if MICROPY_ESPNOW_RSSI
+    self->enable_rssi = DEFAULT_ENABLE_RSSI;
     self->peers_table = mp_obj_new_dict(0);
     // Prevent user code modifying the dict
     mp_obj_dict_get_map(self->peers_table)->is_fixed = 1;
@@ -238,11 +243,12 @@ STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     esp_espnow_obj_t *self = _get_singleton();
-    enum { ARG_get, ARG_buffer, ARG_timeout, ARG_rate };
+    enum { ARG_get, ARG_buffer, ARG_timeout, ARG_enable_rssi, ARG_rate };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_buffer, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = INT_MIN} },
+        { MP_QSTR_enable_rssi, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_int = -1} },
         { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -255,6 +261,12 @@ STATIC mp_obj_t espnow_config(
     if (args[ARG_timeout].u_int != INT_MIN) {
         self->recv_timeout_ms = args[ARG_timeout].u_int;
     }
+    #if MICROPY_ESPNOW_RSSI
+    if (args[ARG_enable_rssi].u_int >= 0) {
+        self->enable_rssi =
+            ((args[ARG_enable_rssi].u_int > 0) ? true : false);
+    }
+    #endif // MICROPY_ESPNOW_RSSI
     if (args[ARG_rate].u_int >= 0) {
         #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
         esp_initialise_wifi();  // Call the wifi init code in network_wlan.c
@@ -478,8 +490,10 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
 
     #if MICROPY_ESPNOW_RSSI
     // Update rssi value in the peer device table
-    mp_map_elem_t *entry = _update_rssi(peer_buf, hdr.rssi, hdr.time_ms);
-    list->items[0] = entry->key;  // Set first element of list to peer
+    if (self->enable_rssi) {
+        mp_map_elem_t *entry = _update_rssi(peer_buf, hdr.rssi, hdr.time_ms);
+        list->items[0] = entry->key;  // Set first element of list to peer
+    }
     if (list->len >= 4) {
         list->items[2] = MP_OBJ_NEW_SMALL_INT(hdr.rssi);
         list->items[3] = mp_obj_new_int(hdr.time_ms);
