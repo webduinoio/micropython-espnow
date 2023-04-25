@@ -115,7 +115,7 @@ Configuration
 
     .. data:: Arguments:
 
-      - ``flag``: Any python value which can be converted to a boolean type.
+      - *flag*: Any python value which can be converted to a boolean type.
 
         - ``True``: Prepare the software and hardware for use of the ESPNow
           communication protocol, including:
@@ -129,7 +129,7 @@ Configuration
           (esp_now_deinit()), disable callbacks, deallocate the recv
           data buffer and deregister all peers.
 
-    If ``flag`` is not provided, return the current status of the ESPNow
+    If *flag* is not provided, return the current status of the ESPNow
     interface.
 
     .. data:: Returns:
@@ -148,7 +148,7 @@ Configuration
 
     .. data:: Options:
 
-        ``rxbuf``: *(default=526)* Get/set the size in bytes of the internal
+        *rxbuf*: (default=526) Get/set the size in bytes of the internal
         buffer used to store incoming ESPNow packet data. The default size is
         selected to fit two max-sized ESPNow packets (250 bytes) with associated
         mac_address (6 bytes), a message byte count (1 byte) and RSSI data plus
@@ -159,12 +159,12 @@ Configuration
         this value will have no effect until the next call of
         `ESPNow.active(True)<ESPNow.active()>`.
 
-        ``timeout``: *(default=300,000)* Default timeout (in milliseconds) for
-        receiving ESPNOW messages. If ``timeout`` is less than zero, then wait
-        forever. The timeout can also be provided as arg to
+        *timeout_ms*: (default=300,000) Default timeout (in milliseconds)
+        for receiving ESPNOW messages. If *timeout_ms* is less than zero, then
+        wait forever. The timeout can also be provided as arg to
         `recv()`/`irecv()`/`recvinto()`.
 
-        ``rate``: (ESP32 only, IDF>=4.3.0 only) Set the transmission speed for
+        *rate*: (ESP32 only, IDF>=4.3.0 only) Set the transmission speed for
         espnow packets. Must be set to a number from the allowed numeric values
         in `enum wifi_phy_rate_t
         <https://docs.espressif.com/projects/esp-idf/en/v4.4.1/esp32/
@@ -210,15 +210,15 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 
     .. data:: Arguments:
 
-      - ``mac``: byte string exactly ``espnow.ADDR_LEN`` (6 bytes) long or
-        ``None``. If ``mac`` is ``None`` (ESP32 only) the message will be sent
+      - *mac*: byte string exactly ``espnow.ADDR_LEN`` (6 bytes) long or
+        ``None``. If *mac* is ``None`` (ESP32 only) the message will be sent
         to all registered peers, except any broadcast or multicast MAC
         addresses.
 
-      - ``msg``: string or byte-string up to ``espnow.MAX_DATA_LEN`` (250)
+      - *msg*: string or byte-string up to ``espnow.MAX_DATA_LEN`` (250)
         bytes long.
 
-      - ``sync``:
+      - *sync*:
 
         - ``True``: (default) send ``msg`` to the peer(s) and wait for a
           response (or not).
@@ -246,7 +246,7 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
     regardless of whether it has initialised it's ESP-Now system or is
     actively listening for ESP-Now traffic (see the Espressif ESP-Now docs).
 
-.. method:: ESPNow.recv([timeout])
+.. method:: ESPNow.recv([timeout_ms])
 
     Wait for an incoming message and return the ``mac`` adress of the peer and
     the message. **Note**: It is **not** necessary to register a peer (using
@@ -254,13 +254,17 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 
     .. data:: Arguments:
 
-        ``timeout``: *(Optional)* If provided and not `None`, sets a timeout (in
-        milliseconds) for the read. The default timeout (5 minutes) is set using
-        `ESPNow.config()`. If ``timeout`` is less than zero, then wait forever.
+        - *timeout_ms*: (Optional): May have the following values.
+
+          - ``0``: No timeout. Return immediately if no data is available;
+          - ``> 0``: Specify a timeout value in milliseconds;
+          - ``< 0``: Do not timeout, ie. wait forever for new messages; or
+          - ``None`` (or not provided): Use the default timeout value set with
+            `ESPNow.config()`.
 
     .. data:: Returns:
 
-      - ``(None, None)`` if ``timeout`` before a message is received, or
+      - ``(None, None)`` if timeout is reached before a message is received, or
 
       - ``[mac, msg]``: where:
 
@@ -271,9 +275,9 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
     .. data:: Raises:
 
       - ``OSError(num, "ESP_ERR_ESPNOW_NOT_INIT")`` if not initialised.
-      - ``OSError(num, "ESP_ERR_ESPNOW_IF")`` the wifi interface is not
+      - ``OSError(num, "ESP_ERR_ESPNOW_IF")`` if the wifi interface is not
         `active()<network.WLAN.active>`.
-      - ``ValueError()`` on invalid ``timeout`` values.
+      - ``ValueError()`` on invalid *timeout_ms* values.
 
     `ESPNow.recv()` will allocate new storage for the returned list and the
     ``peer`` and ``msg`` bytestrings. This can lead to memory fragmentation if
@@ -281,15 +285,15 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
     alternative.
 
 
-.. method:: ESPNow.irecv([timeout])
+.. method:: ESPNow.irecv([timeout_ms])
 
     Works like `ESPNow.recv()` but will re-use internal bytearrays to store the
-    return values: ``[mac, peer]``, so that no new memory is allocated on each
+    return values: ``[mac, msg]``, so that no new memory is allocated on each
     call.
 
     .. data:: Arguments:
 
-        ``timeout``: *(Optional)* Timeout in milliseconds (see `ESPNow.recv()`).
+        *timeout_ms*: (Optional) Timeout in milliseconds (see `ESPNow.recv()`).
 
     .. data:: Returns:
 
@@ -301,7 +305,7 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
       - See `ESPNow.recv()`.
 
     **Note:** You may also read messages by iterating over the ESPNow object,
-    which will use `irecv()` method for alloc-free reads, eg: ::
+    which will use the `irecv()` method for alloc-free reads, eg: ::
 
       import espnow
       e = espnow.ESPNow(); e.active(True)
@@ -310,7 +314,7 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
           if mac is None:   # mac, msg will equal (None, None) on timeout
               break
 
-.. method:: ESPNow.recvinto(data[, timeout])
+.. method:: ESPNow.recvinto(data[, timeout_ms])
 
     Wait for an incoming message and return the length of the message in bytes.
     This is the low-level method used by both `recv()<ESPNow.recv()>` and
@@ -318,17 +322,17 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 
     .. data:: Arguments:
 
-        ``data``: A list of at least two elements, ``[peer, msg]``. ``msg`` must
+        *data*: A list of at least two elements, ``[peer, msg]``. ``msg`` must
         be a bytearray large enough to hold the message (250 bytes). On the
         ESP8266, ``peer`` should be a bytearray of 6 bytes. The MAC address of
         the sender and the message will be stored in these bytearrays (see Note
         on ESP32 below).
 
-        ``timeout``: *(Optional)* Timeout in milliseconds (see `ESPNow.recv()`).
+        *timeout_ms*: (Optional) Timeout in milliseconds (see `ESPNow.recv()`).
 
     .. data:: Returns:
 
-      - Length of message in bytes or 0 if ``timeout`` is reached before a
+      - Length of message in bytes or 0 if *timeout_ms* is reached before a
         message is received.
 
     .. data:: Raises:
@@ -347,9 +351,9 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 
     Check if data is available to be read with `ESPNow.recv()`.
 
-    For more sophisticated querying of available characters use select.poll::
+    For more sophisticated querying of available characters use `select.poll()`::
 
-      import uselect as select
+      import select
       import espnow
 
       e = espnow.ESPNow()
@@ -367,7 +371,7 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 
       A 5-tuple containing the number of packets sent/received/lost:
 
-      ``(tx_pkts, tx_responses, tx_failures, rx_packets, dropped_rx_packets)``
+      ``(tx_pkts, tx_responses, tx_failures, rx_packets, rx_dropped_packets)``
 
     Incoming packets are *dropped* when the recv buffers are full. To reduce
     packet loss, increase the ``rxbuf`` config parameters and ensure you are
@@ -389,7 +393,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     Keys (LMK) for encrypting ESPNow data traffic. If this is not set, a
     default PMK is used by the underlying Espressif esp_now software stack.
 
-    **Note:** messages will only be encrypted if ``lmk`` is also set in
+    **Note:** messages will only be encrypted if *lmk* is also set in
     `ESPNow.add_peer()` (see `Security
     <https://docs.espressif.com/projects/esp-idf/en/latest/
     esp32/api-reference/network/esp_now.html#security>`_ in the Espressif API
@@ -397,7 +401,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
     .. data:: Arguments:
 
-      ``pmk``: Must be a byte string, bytearray or string of length
+      *pmk*: Must be a byte string, bytearray or string of length
       `espnow.KEY_LEN` (16 bytes).
 
     .. data:: Returns:
@@ -406,21 +410,21 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
     .. data:: Raises:
 
-      ``ValueError()`` on invalid ``pmk`` values.
+      ``ValueError()`` on invalid *pmk* values.
 
 .. method:: ESPNow.add_peer(mac, [lmk], [channel], [ifidx], [encrypt])
             ESPNow.add_peer(mac, param=value, ...)   (ESP32 only)
 
-    Add/register the provided ``mac`` address as a peer. Additional parameters
+    Add/register the provided *mac* address as a peer. Additional parameters
     may also be specified as positional or keyword arguments:
 
     .. data:: Arguments:
 
-        - ``mac``: The MAC address of the peer (as a 6-byte byte-string).
+        - *mac*: The MAC address of the peer (as a 6-byte byte-string).
 
-        - ``lmk``: The Local Master Key (LMK) key used to encrypt data
+        - *lmk*: The Local Master Key (LMK) key used to encrypt data
           transfers with this peer (unless the *encrypt* parameter is set to
-          *False*). Must be:
+          ``False``). Must be:
 
           - a byte-string or bytearray or string of length ``espnow.KEY_LEN``
             (16 bytes), or
@@ -428,17 +432,17 @@ The Espressif ESP-Now software requires that other devices (peers) must be
           - any non ``True`` python value (default= ``b''``), signifying an
             *empty* key which will disable encryption.
 
-        - ``channel``: The wifi channel (2.4GHz) to communicate with this peer.
+        - *channel*: The wifi channel (2.4GHz) to communicate with this peer.
           Must be an integer from 0 to 14. If channel is set to 0 the current
           channel of the wifi device will be used. (default=0)
 
-        - ``ifidx``: *(ESP32 only)* Index of the wifi interface which will be
+        - *ifidx*: (ESP32 only) Index of the wifi interface which will be
           used to send data to this peer. Must be an integer set to
           ``network.STA_IF`` (=0) or ``network.AP_IF`` (=1).
           (default=0/``network.STA_IF``). See `ESPNow and Wifi Operation`_
           below for more information.
 
-        - ``encrypt``: *(ESP32 only)* If set to ``True`` data exchanged with
+        - *encrypt*: (ESP32 only) If set to ``True`` data exchanged with
           this peer will be encrypted with the PMK and LMK. (default =
           ``False``)
 
@@ -455,7 +459,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     .. data:: Raises:
 
         - ``OSError(num, "ESP_ERR_ESPNOW_NOT_INIT")`` if not initialised.
-        - ``OSError(num, "ESP_ERR_ESPNOW_EXIST")`` if ``mac`` is already
+        - ``OSError(num, "ESP_ERR_ESPNOW_EXIST")`` if *mac* is already
           registered.
         - ``OSError(num, "ESP_ERR_ESPNOW_FULL")`` if too many peers are
           already registered.
@@ -463,7 +467,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
 .. method:: ESPNow.del_peer(mac)
 
-    Deregister the peer associated with the provided ``mac`` address.
+    Deregister the peer associated with the provided *mac* address.
 
     .. data:: Returns:
 
@@ -472,9 +476,9 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     .. data:: Raises:
 
         - ``OSError(num, "ESP_ERR_ESPNOW_NOT_INIT")`` if not initialised.
-        - ``OSError(num, "ESP_ERR_ESPNOW_NOT_FOUND")`` if ``mac`` is not
+        - ``OSError(num, "ESP_ERR_ESPNOW_NOT_FOUND")`` if *mac* is not
           registered.
-        - ``ValueError()`` on invalid ``mac`` values.
+        - ``ValueError()`` on invalid *mac* values.
 
 .. method:: ESPNow.get_peer(mac) (ESP32 only)
 
@@ -483,14 +487,14 @@ The Espressif ESP-Now software requires that other devices (peers) must be
     .. data:: Returns:
 
         ``(mac, lmk, channel, ifidx, encrypt)``: a tuple of the "peer
-        info" associated with the ``mac`` address.
+        info" associated with the given *mac* address.
 
     .. data:: Raises:
 
         - ``OSError(num, "ESP_ERR_ESPNOW_NOT_INIT")`` if not initialised.
-        - ``OSError(num, "ESP_ERR_ESPNOW_NOT_FOUND")`` if ``mac`` is not
+        - ``OSError(num, "ESP_ERR_ESPNOW_NOT_FOUND")`` if *mac* is not
           registered.
-        - ``ValueError()`` on invalid ``mac`` values.
+        - ``ValueError()`` on invalid *mac* values.
 
 .. method:: ESPNow.peer_count() (ESP32 only)
 
@@ -509,7 +513,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 .. method:: ESPNow.mod_peer(mac, lmk, [channel], [ifidx], [encrypt]) (ESP32 only)
             ESPNow.mod_peer(mac, 'param'=value, ...) (ESP32 only)
 
-    Modify the parameters of the peer associated with the provided ``mac``
+    Modify the parameters of the peer associated with the provided *mac*
     address. Parameters may be provided as positional or keyword arguments
     (see `ESPNow.add_peer()`).
 
@@ -519,19 +523,22 @@ Callback Methods
 .. method:: ESPNow.irq(callback[, arg=None]) (ESP32 only)
 
   Set a callback function to be called *as soon as possible* after a message has
-  been received from another ESPNow device. The function will be called with
-  ``arg`` as an argument, eg: ::
+  been received from another ESPNow device. The callback function will be called
+  with the `ESPNow` instance object as an argument, eg: ::
 
           def recv_cb(e):
               print(e.irecv(0))
-          e.irq(recv_cb, e)
+          e.irq(recv_cb)
+
+  If *arg* is provided, it will be passed as an argument to the callback
+  function instead.
 
   The `irq()<ESPNow.irq()>` callback method is an alternative method for
   processing incoming espnow messages, especially if the data rate is moderate
   and the device is *not too busy* but there are some caveats:
 
-  - The scheduler stack *can* easily overflow and callbacks will be missed if
-    packets are arriving at a sufficient rate or if other micropython components
+  - The scheduler stack *can* overflow and callbacks will be missed if
+    packets are arriving at a sufficient rate or if other MicroPython components
     (eg, bluetooth, machine.Pin.irq(), machine.timer, i2s, ...) are exercising
     the scheduler stack. This method may be less reliable for dealing with
     bursts of messages, or high throughput or on a device which is busy dealing
@@ -553,7 +560,7 @@ Exceptions
 ----------
 
 If the underlying Espressif ESPNow software stack returns an error code,
-the micropython ESPNow module will raise an ``OSError(errnum, errstring)``
+the MicroPython ESPNow module will raise an ``OSError(errnum, errstring)``
 exception where ``errstring`` is set to the name of one of the error codes
 identified in the
 `Espressif ESP-Now docs
@@ -614,10 +621,10 @@ Supporting asyncio
 ------------------
 
 A supplementary module (`aioespnow`) is available to provide
-:doc:`uasyncio<uasyncio>` support.
+:doc:`asyncio<uasyncio>` support.
 
 **Note:** Asyncio support is available on all ESP32 targets as well as those
-ESP8266 boards which include the uasyncio module (ie. ESP8266 devices with at
+ESP8266 boards which include the asyncio module (ie. ESP8266 devices with at
 least 2MB flash memory).
 
 A small async server example::
@@ -684,7 +691,7 @@ A small async server example::
 
     Asyncio support for `ESPNow.send()`.
 
-.. method:: __aiter__()/async __anext__()
+.. method:: AIOESPNow._aiter__() / async AIOESPNow.__anext__()
 
     `AIOESPNow` also supports reading incoming messages by asynchronous
     iteration using ``async for``; eg::
@@ -703,22 +710,22 @@ Broadcast and Multicast
 
 All active ESP-Now clients will receive messages sent to their MAC address and
 all devices (**except ESP8266 devices**) will also receive messages sent to the
-``broadcast`` MAC address (``b'\xff\xff\xff\xff\xff\xff'``) or any multicast
+*broadcast* MAC address (``b'\xff\xff\xff\xff\xff\xff'``) or any multicast
 MAC address.
 
 All ESP-Now devices (including ESP8266 devices) can also send messages to the
-``broadcast`` MAC address or any multicast MAC address.
+broadcast MAC address or any multicast MAC address.
 
-To `send()<ESPNow.send()>` a broadcast message, the ``broadcast`` (or
+To `send()<ESPNow.send()>` a broadcast message, the broadcast (or
 multicast) MAC address must first be registered using
 `add_peer()<ESPNow.add_peer()>`. `send()<ESPNow.send()>` will always return
 ``True`` for broadcasts, regardless of whether any devices receive the
-message. It is not permitted to encrypt messages sent to the ``broadcast``
+message. It is not permitted to encrypt messages sent to the broadcast
 address or any multicast address.
 
 **Note**: `ESPNow.send(None, msg)<ESPNow.send()>` will send to all registered
 peers *except* the broadcast address. To send a broadcast or multicast
-message, you must specify the ``broadcast`` (or multicast) MAC address as the
+message, you must specify the broadcast (or multicast) MAC address as the
 peer. For example::
 
     bcast = b'\xff' * 6
@@ -804,7 +811,7 @@ espnow:
 
 Other issues to take care with when using ESPNow with wifi are:
 
-- **Set WIFI to known state on startup:** Micropython does not reset the wifi
+- **Set WIFI to known state on startup:** MicroPython does not reset the wifi
   peripheral after a soft reset. This can lead to unexpected behaviour. To
   guarantee the wifi is reset to a known state after a soft reset make sure you
   deactivate the STA_IF and AP_IF before setting them to the desired state at
@@ -825,10 +832,10 @@ Other issues to take care with when using ESPNow with wifi are:
 
     sta, ap = wifi_reset()
 
-  Remember that a soft reset occurs every time you connect to the device repl
+  Remember that a soft reset occurs every time you connect to the device REPL
   and when you type ``ctrl-D``.
 
-- **STA_IF and AP_IF always operate on the same channel:** the AP_IF wil change
+- **STA_IF and AP_IF always operate on the same channel:** the AP_IF will change
   channel when you connect to a wifi network; regardless of the channel you set
   for the AP_IF (see `Attention Note 3
   <https://docs.espressif.com/
@@ -847,8 +854,8 @@ Other issues to take care with when using ESPNow with wifi are:
   channel or configure your devices to re-scan the wifi channels if they are
   unable to find their expected peers on the current channel.
 
-- **Micropython re-scans wifi channels when trying to reconnect:** If the esp
-  device is connected to a Wifi Access Point that goes down, micropython will
+- **MicroPython re-scans wifi channels when trying to reconnect:** If the esp
+  device is connected to a Wifi Access Point that goes down, MicroPython will
   automatically start scanning channels in an attempt to reconnect to the
   Access Point. This means espnow messages will be lost while scanning for the
   AP. This can be disabled by ``sta.config(reconnects=0)``, which will also
