@@ -204,10 +204,10 @@ STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     esp_espnow_obj_t *self = _get_singleton();
-    enum { ARG_rxbuf, ARG_timeout };
+    enum { ARG_rxbuf, ARG_timeout_ms };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_rxbuf, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
-        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_timeout_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     mp_arg_parse_all(n_args - 1, pos_args + 1, kw_args,
@@ -215,8 +215,8 @@ STATIC mp_obj_t espnow_config(
     if (args[ARG_rxbuf].u_int >= 0) {
         self->recv_buffer_size = args[ARG_rxbuf].u_int;
     }
-    if (args[ARG_timeout].u_int >= 0) {
-        self->recv_timeout_ms = args[ARG_timeout].u_int;
+    if (args[ARG_timeout_ms].u_int >= 0) {
+        self->recv_timeout_ms = args[ARG_timeout_ms].u_int;
     }
     return mp_const_none;
 }

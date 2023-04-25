@@ -15,12 +15,12 @@ class ESPNow(ESPNowBase):
         self._poll = poll()  # For any() method below...
         self._poll.register(self, POLLIN)
 
-    def irecv(self, timeout=None):
-        n = self.recvinto(self._data, timeout)
+    def irecv(self, timeout_ms=None):
+        n = self.recvinto(self._data, timeout_ms)
         return self._data if n else self._none_tuple
 
-    def recv(self, timeout=None):
-        n = self.recvinto(self._data, timeout)
+    def recv(self, timeout_ms=None):
+        n = self.recvinto(self._data, timeout_ms)
         return [bytes(x) for x in self._data] if n else self._none_tuple
 
     def __iter__(self):

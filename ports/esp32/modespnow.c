@@ -238,11 +238,11 @@ STATIC mp_obj_t espnow_config(
     size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
 
     esp_espnow_obj_t *self = _get_singleton();
-    enum { ARG_get, ARG_buffer, ARG_timeout, ARG_rate };
+    enum { ARG_get, ARG_buffer, ARG_timeout_ms, ARG_rate };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_, MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
         { MP_QSTR_buffer, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
-        { MP_QSTR_timeout, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = INT_MIN} },
+        { MP_QSTR_timeout_ms, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = INT_MIN} },
         { MP_QSTR_rate, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = -1} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
@@ -252,8 +252,8 @@ STATIC mp_obj_t espnow_config(
     if (args[ARG_buffer].u_int >= 0) {
         self->recv_buffer_size = args[ARG_buffer].u_int;
     }
-    if (args[ARG_timeout].u_int != INT_MIN) {
-        self->recv_timeout_ms = args[ARG_timeout].u_int;
+    if (args[ARG_timeout_ms].u_int != INT_MIN) {
+        self->recv_timeout_ms = args[ARG_timeout_ms].u_int;
     }
     if (args[ARG_rate].u_int >= 0) {
         #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 3, 0)
@@ -274,7 +274,7 @@ STATIC mp_obj_t espnow_config(
     uintptr_t name = (uintptr_t)args[ARG_get].u_obj;
     if (name == QS(MP_QSTR_buffer)) {
         return mp_obj_new_int(self->recv_buffer_size);
-    } else if (name == QS(MP_QSTR_timeout)) {
+    } else if (name == QS(MP_QSTR_timeout_ms)) {
         return mp_obj_new_int(self->recv_timeout_ms);
     } else {
         mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
