@@ -26,8 +26,8 @@ except ImportError:
 
 
 # Set read timeout to 5 seconds
-timeout = 5000
-default_pmk = b"Micropyth0nRules"
+timeout_ms = 5000
+default_pmk = b"MicroPyth0nRules"
 default_lmk = b"0123456789abcdef"
 sync = True
 
@@ -36,7 +36,7 @@ def echo_server(e):
     peers = []
     while True:
         # Wait for messages from the client
-        peer, msg = e.recv(timeout)
+        peer, msg = e.recv(timeout_ms)
         if peer is None:
             return
         if peer not in peers:
@@ -70,7 +70,7 @@ def echo_test(e, peer, msg, sync):
         print("ERROR: OSError:")
         return
 
-    p2, msg2 = e.recv(timeout)
+    p2, msg2 = e.recv(timeout_ms)
     if p2 is None:
         print("ERROR: No response from server.")
         raise SystemExit

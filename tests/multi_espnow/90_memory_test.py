@@ -2,7 +2,6 @@
 # This test works with ESP32 or ESP8266 as server or client.
 
 try:
-    import micropython
     import network
     import random
     import espnow
@@ -11,8 +10,8 @@ except ImportError:
     raise SystemExit
 
 # Set read timeout to 5 seconds
-timeout = 5000
-default_pmk = b"Micropyth0nRules"
+timeout_ms = 5000
+default_pmk = b"MicroPyth0nRules"
 sync = True
 
 
@@ -20,7 +19,7 @@ def echo_server(e):
     peers = []
     i = 0
     while True:
-        peer, msg = e.irecv(timeout)
+        peer, msg = e.irecv(timeout_ms)
         i += 1
         if i % 10 == 0:
             print("OK:", i)
@@ -49,7 +48,7 @@ def echo_test(e, peer, msg, sync):
         print("ERROR: OSError:")
         return
 
-    p2, msg2 = e.irecv(timeout)
+    p2, msg2 = e.irecv(timeout_ms)
     if msg2 != msg:
         print("ERROR: Received != Sent")
 

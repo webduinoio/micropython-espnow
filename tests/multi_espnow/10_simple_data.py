@@ -9,8 +9,8 @@ except ImportError:
     raise SystemExit
 
 # Set read timeout to 5 seconds
-timeout = 5000
-default_pmk = b"Micropyth0nRules"
+timeout_ms = 5000
+default_pmk = b"MicroPyth0nRules"
 
 
 def init(sta_active=True, ap_active=False):
@@ -30,9 +30,9 @@ def instance0():
     e = init(True, False)
     multitest.globals(PEERS=[network.WLAN(i).config("mac") for i in (0, 1)])
     multitest.next()
-    peer, msg1 = e.recv(5000)
+    peer, msg1 = e.recv(timeout_ms)
     if msg1 is None:
-        print("e.recv(5000): Timeout waiting for message.")
+        print("e.recv({timeout_ms}): Timeout waiting for message.")
         e.active(False)
         return
     print(bytes(msg1))
@@ -52,6 +52,6 @@ def instance1():
     msg1 = b"client to server"
     e.send(peer, msg1)
     print(bytes(msg1))
-    peer2, msg2 = e.recv(10000)
+    peer2, msg2 = e.recv(timeout_ms)
     print(bytes(msg2))
     e.active(False)

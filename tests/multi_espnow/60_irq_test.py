@@ -1,12 +1,10 @@
 # Test of a ESPnow echo server and client transferring data.
 # Test the ESP32 extemnsions. Assumes instance1 is an ESP32.
-# Instance1 may be and ESP32 or ESP8266
+# Instance0 may be an ESP32 or ESP8266
 
 try:
     import network
     import random
-    import uselect
-    import usys
     import time
     import espnow
 except ImportError:
@@ -14,15 +12,15 @@ except ImportError:
     raise SystemExit
 
 # Set read timeout to 5 seconds
-timeout = 5000
-default_pmk = b"Micropyth0nRules"
+timeout_ms = 5000
+default_pmk = b"MicroPyth0nRules"
 sync = True
 
 
 def echo_server(e):
     peers = []
     while True:
-        peer, msg = e.irecv(timeout)
+        peer, msg = e.irecv(timeout_ms)
         if peer is None:
             return
         if peer not in peers:
@@ -85,7 +83,7 @@ def instance1():
         print("SKIP")
         raise SystemExit
 
-    e.config(timeout=timeout)
+    e.config(timeout_ms=timeout_ms)
     multitest.next()
     peer = PEERS[0]
     e.add_peer(peer)
@@ -104,7 +102,7 @@ def instance1():
     client_send(e, peer, msg, True)
     start = time.ticks_ms()
     while not done:
-        if time.ticks_ms() - start > timeout:
+        if time.ticks_ms() - start > timeout_ms:
             print("Timeout waiting for response.")
             raise SystemExit
     e.irq(None)
