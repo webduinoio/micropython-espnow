@@ -520,7 +520,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 Callback Methods
 ----------------
 
-.. method:: ESPNow.irq(callback[, arg=None]) (ESP32 only)
+.. method:: ESPNow.irq(callback) (ESP32 only)
 
   Set a callback function to be called *as soon as possible* after a message has
   been received from another ESPNow device. The callback function will be called
@@ -529,9 +529,6 @@ Callback Methods
           def recv_cb(e):
               print(e.irecv(0))
           e.irq(recv_cb)
-
-  If *arg* is provided, it will be passed as an argument to the callback
-  function instead.
 
   The `irq()<ESPNow.irq()>` callback method is an alternative method for
   processing incoming espnow messages, especially if the data rate is moderate

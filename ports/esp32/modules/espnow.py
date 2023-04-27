@@ -20,8 +20,8 @@ class ESPNow(ESPNowBase):
         n = self.recvinto(self._data, timeout_ms)
         return [bytes(x) for x in self._data] if n else self._none_tuple
 
-    def irq(self, callback, arg=None):
-        super().irq(callback, self if arg is None else arg)
+    def irq(self, callback):
+        super().irq(callback, self)
 
     def __iter__(self):
         return self
