@@ -95,7 +95,8 @@ static inline size_t ringbuf_avail(ringbuf_t *r) {
 int ringbuf_get16(ringbuf_t *r);
 int ringbuf_peek16(ringbuf_t *r);
 int ringbuf_put16(ringbuf_t *r, uint16_t v);
-int ringbuf_read(ringbuf_t *r, void *data, size_t data_len);
-int ringbuf_write(ringbuf_t *r, const void *data, size_t data_len);
+
+int ringbuf_get_bytes(ringbuf_t *r, uint8_t *data, size_t data_len);
+int ringbuf_put_bytes(ringbuf_t *r, const uint8_t *data, size_t data_len);
 
 #endif // MICROPY_INCLUDED_PY_RINGBUF_H

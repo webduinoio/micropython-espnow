@@ -102,7 +102,7 @@ def instance1():
     client_send(e, peer, msg, True)
     start = time.ticks_ms()
     while not done:
-        if time.ticks_ms() - start > timeout_ms:
+        if time.ticks_diff(time.ticks_ms(), start) > timeout_ms:
             print("Timeout waiting for response.")
             raise SystemExit
     e.irq(None)

@@ -248,7 +248,7 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 
 .. method:: ESPNow.recv([timeout_ms])
 
-    Wait for an incoming message and return the ``mac`` adress of the peer and
+    Wait for an incoming message and return the ``mac`` address of the peer and
     the message. **Note**: It is **not** necessary to register a peer (using
     `add_peer()<ESPNow.add_peer()>`) to receive a message from that peer.
 
@@ -739,28 +739,25 @@ point. When an ESP32 or ESP8266 device connects to a Wifi Access Point (see
 `ESP32 Quickref <../esp32/quickref.html#networking>`__) the following things
 happen which affect ESPNow communications:
 
-1. Power saving mode (``ps_mode=WIFI_PS_MIN_MODEM``) is automatically activated;
-   and
+1. Wifi Power-saving Mode is automatically activated and
 2. The radio on the esp device changes wifi ``channel`` to match the channel
    used by the Access Point.
 
-**Power Saving Mode:** The power saving mode causes the device to turn off the
-radio periodically (search the internet for "DTIM Interval" for further
-details), making it unreliable in receiving ESPNow messages. This can be
+**Wifi Power-saving Mode:** (see `Espressif Docs <https://docs.espressif.com/
+projects/esp-idf/en/latest/esp32/api-guides/
+wifi.html#esp32-wi-fi-power-saving-mode>`_) The power saving mode causes the
+device to turn off the radio periodically (typically for hundreds of
+milliseconds), making it unreliable in receiving ESPNow messages. This can be
 resolved by either of:
 
-1. Disabling the power-saving mode on the STA_IF interface (ESP32 only);
-
-   - Use ``sta.config(ps_mode=WIFI_PS_NONE)``
-
-2. Turning on the AP_IF interface will also disable the power saving mode.
+1. Turning on the AP_IF interface, which will disable the power saving mode.
    However, the device will then be advertising an active wifi access point.
 
-   - You **may** also choose to send your messages via the AP_IF
-     interface, but this is not necessary.
+   - You **may** also choose to send your messages via the AP_IF interface, but
+     this is not necessary.
    - ESP8266 peers must send messages to this AP_IF interface (see below).
 
-3. Configuring ESPNow clients to retry sending messages.
+2. Configuring ESPNow clients to retry sending messages.
 
 **Receiving messages from an ESP8266 device:** Strangely, an ESP32 device
 connected to a wifi network using method 1 or 2 above, will receive ESP-Now
@@ -781,10 +778,9 @@ espnow:
 
   sta, ap = wifi_reset()  # Reset wifi to AP off, STA on and disconnected
   sta.connect('myssid', 'mypassword')
-  while not sta.isconnected():              # Wait until connected...
+  while not sta.isconnected():  # Wait until connected...
       time.sleep(0.1)
-  sta.config(ps_mode=network.WIFI_PS_NONE)  # ..then disable power saving
-  # ap.active(True)  # Alternative to above
+  ap.active(True)         # Disable power-saving mode
 
   # Print the wifi channel used AFTER finished connecting to access point
   print("Proxy running on channel:", sta.config("channel"))

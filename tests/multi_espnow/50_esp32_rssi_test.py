@@ -99,7 +99,7 @@ def instance1():
         rssi, time_ms = e.peers_table[peer]
         if not -127 < rssi < 0:
             print("ERROR: Invalid rssi value:", rssi)
-        elif abs(time.ticks_ms() - time_ms) > 5000:
+        elif time.ticks_diff(time.ticks_ms(), time_ms) > 5000:
             print("ERROR: Unexpected time_ms value:", time_ms)
         else:
             print("OK")

@@ -90,10 +90,9 @@ static const size_t MAX_PACKET_LEN = (
 // Default timeout (millisec) to wait for incoming ESPNow messages (5 minutes).
 #define DEFAULT_RECV_TIMEOUT_MS (5 * 60 * 1000)
 
-// Number of milliseconds to wait (mp_hal_wait_ms()) in each loop
-// while waiting for send or receive packet.
-// Needs to be >15ms to permit yield to other tasks.
-#define BUSY_WAIT_MS (25)
+// Number of milliseconds to wait for pending responses to sent packets.
+// This is a fallback which should never be reached.
+#define PENDING_RESPONSES_TIMEOUT_MS 100
 
 // The data structure for the espnow_singleton.
 typedef struct _esp_espnow_obj_t {
@@ -200,9 +199,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_active_obj, 1, 2, espnow_activ
 // Initialise the Espressif ESPNOW software stack, register callbacks and
 // allocate the recv data buffers.
 // Returns True if interface is active, else False.
-STATIC mp_obj_t espnow_config(
-    size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
-
+STATIC mp_obj_t espnow_config(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
     esp_espnow_obj_t *self = _get_singleton();
     enum { ARG_rxbuf, ARG_timeout_ms };
     static const mp_arg_t allowed_args[] = {
@@ -252,9 +249,9 @@ STATIC void recv_cb(uint8_t *mac_addr, uint8_t *msg, uint8_t msg_len) {
     header.magic = ESPNOW_MAGIC;
     header.msg_len = msg_len;
 
-    ringbuf_write(buf, &header, sizeof(header));
-    ringbuf_write(buf, mac_addr, ESP_NOW_ETH_ALEN);
-    ringbuf_write(buf, msg, msg_len);
+    ringbuf_put_bytes(buf, (uint8_t *)&header, sizeof(header));
+    ringbuf_put_bytes(buf, mac_addr, ESP_NOW_ETH_ALEN);
+    ringbuf_put_bytes(buf, msg, msg_len);
 }
 
 // Return C pointer to byte memory string/bytes/bytearray in obj.
@@ -263,8 +260,7 @@ static uint8_t *_get_bytes_len_rw(mp_obj_t obj, size_t len, mp_uint_t rw) {
     mp_buffer_info_t bufinfo;
     mp_get_buffer_raise(obj, &bufinfo, rw);
     if (bufinfo.len != len) {
-        mp_raise_ValueError(
-            MP_ERROR_TEXT("ESPNow: bytes or bytearray wrong length"));
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid buffer length"));
     }
     return (uint8_t *)bufinfo.buf;
 }
@@ -281,12 +277,14 @@ static uint8_t *_get_bytes_len_w(mp_obj_t obj, size_t len) {
 //
 
 // Copy data from the ring buffer - wait if buffer is empty up to timeout_ms
-int ringbuf_read_wait(ringbuf_t *r, void *data, size_t len, int timeout_ms) {
-    int64_t end = mp_hal_ticks_ms() + timeout_ms;
+//    0: Success
+//   -1: Not enough data available to complete read (try again later)
+//   -2: Requested read is larger than buffer - will never succeed
+static int ringbuf_get_bytes_wait(ringbuf_t *r, uint8_t *data, size_t len, mp_int_t timeout_ms) {
+    mp_uint_t start = mp_hal_ticks_ms();
     int status = 0;
-    while (
-        ((status = ringbuf_read(r, data, len)) == 0) &&
-        (end - (int64_t)mp_hal_ticks_ms()) >= 0) {
+    while (((status = ringbuf_get_bytes(r, data, len)) == -1)
+           && (timeout_ms < 0 || (mp_uint_t)(mp_hal_ticks_ms() - start) < (mp_uint_t)timeout_ms)) {
         MICROPY_EVENT_POLL_HOOK;
     }
     return status;
@@ -321,16 +319,16 @@ STATIC mp_obj_t espnow_recvinto(size_t n_args, const mp_obj_t *args) {
 
     // Read the packet header from the incoming buffer
     espnow_hdr_t hdr;
-    if (ringbuf_read_wait(self->recv_buffer, &hdr, sizeof(hdr), timeout_ms) < 1) {
+    if (ringbuf_get_bytes_wait(self->recv_buffer, (uint8_t *)&hdr, sizeof(hdr), timeout_ms) < 0) {
         return MP_OBJ_NEW_SMALL_INT(0);    // Timeout waiting for packet
     }
     int msg_len = hdr.msg_len;
 
     // Check the message packet header format and read the message data
-    if (hdr.magic != ESPNOW_MAGIC ||
-        msg_len > ESP_NOW_MAX_DATA_LEN ||
-        ringbuf_read(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) < 1 ||
-        ringbuf_read(self->recv_buffer, msg_buf, msg_len) < 1) {
+    if (hdr.magic != ESPNOW_MAGIC
+        || msg_len > ESP_NOW_MAX_DATA_LEN
+        || ringbuf_get_bytes(self->recv_buffer, peer_buf, ESP_NOW_ETH_ALEN) < 0
+        || ringbuf_get_bytes(self->recv_buffer, msg_buf, msg_len) < 0) {
         mp_raise_ValueError(MP_ERROR_TEXT("ESPNow.recv(): buffer error"));
     }
     if (mp_obj_is_type(msg, &mp_type_bytearray)) {
@@ -348,9 +346,11 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_recvinto_obj, 2, 3, espnow_rec
 // ie. self->tx_responses == self->tx_packets.
 // Return the number of responses where status != ESP_NOW_SEND_SUCCESS.
 static void _wait_for_pending_responses(esp_espnow_obj_t *self) {
-    for (int i = 0; i < 90 && self->tx_responses < self->tx_packets; i++) {
-        // Won't yield unless delay > portTICK_PERIOD_MS (10ms)
-        mp_hal_delay_ms(BUSY_WAIT_MS);
+    for (int i = 0; i < PENDING_RESPONSES_TIMEOUT_MS; i++) {
+        if (self->tx_responses >= self->tx_packets) {
+            return;
+        }
+        mp_hal_delay_ms(1);  // Allow other tasks to run
     }
     // Note: the loop timeout is just a fallback - in normal operation
     // we should never reach that timeout.
@@ -392,9 +392,8 @@ STATIC mp_obj_t espnow_send(size_t n_args, const mp_obj_t *args) {
     }
     int saved_failures = self->tx_failures;
 
-    check_esp_err(esp_now_send(
-        _get_bytes_len(args[1], ESP_NOW_ETH_ALEN),
-        message.buf, message.len));
+    check_esp_err(
+        esp_now_send(_get_bytes_len(args[1], ESP_NOW_ETH_ALEN), message.buf, message.len));
     self->tx_packets++;
     if (sync) {
         // Wait for message to be received by peer
@@ -412,8 +411,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(espnow_send_obj, 3, 4, espnow_send);
 // Raise OSError if not initialised.
 // Raise ValueError if key is not a bytes-like object exactly 16 bytes long.
 STATIC mp_obj_t espnow_set_pmk(mp_obj_t _, mp_obj_t key) {
-    check_esp_err(esp_now_set_kok(
-        _get_bytes_len(key, ESP_NOW_KEY_LEN), ESP_NOW_KEY_LEN));
+    check_esp_err(esp_now_set_kok(_get_bytes_len(key, ESP_NOW_KEY_LEN), ESP_NOW_KEY_LEN));
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_2(espnow_set_pmk_obj, espnow_set_pmk);
