@@ -139,12 +139,18 @@ Methods
 Constants
 ---------
 
-.. data:: WLAN.PM_NONE
-        WLAN.PM_MIN_MODEM
-        WLAN.PM_MAX_MODEM
-        WLAN.PM_LIGHT_SLEEP  (``esp8266 only``)
+.. data:: WLAN.PM_PERFORMANCE
+        WLAN.PM_POWERSAVE
+        WLAN.PM_DEFAULT
+        WLAN.PM_NONE
 
-    Allowed values for the ``WLAN.config(pm=...)`` network interface parameter.
-    ``PM_NONE``, ``PM_MIN_MODEM`` and ``PM_MAX_MODEM`` are supported on the
-    esp32 and esp8266 ports. ``PM_LIGHT_SLEEP`` is supported on the esp8266
-    port.
+    Allowed values for the ``WLAN.config(pm=...)`` network interface parameter:
+
+        * ``PM_PERFORMANCE``: high performance wifi with higher power consumption
+        * ``PM_POWERSAVE``: reduce wifi power consumption with reduced
+          performance
+        * ``PM_NONE``: disable wifi power management
+        * ``PM_DEFAULT``: default power settings used by the wifi chip.
+
+    Some wifi chip drivers may also allow setting the *pm* config option to a
+    tuple of driver-specific parameters (for fine tuning power management).
