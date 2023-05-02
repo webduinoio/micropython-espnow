@@ -509,7 +509,21 @@ STATIC mp_obj_t network_wlan_config(size_t n_args, const mp_obj_t *args, mp_map_
                         break;
                     }
                     case MP_QSTR_pm: {
-                        esp_exceptions(esp_wifi_set_ps(mp_obj_get_int(kwargs->table[i].value)));
+                        mp_obj_t arg = kwargs->table[i].value;
+                        mp_int_t pm_mode;
+                        if (!mp_obj_get_int_maybe(arg, &pm_mode)) {
+                            mp_obj_tuple_t *tuple = MP_OBJ_FROM_PTR(arg);
+                            if (mp_obj_is_type(tuple, &mp_type_tuple) && tuple->len == 2) {
+                                pm_mode = mp_obj_get_int(tuple->items[0]);
+                                cfg.sta.listen_interval = mp_obj_get_int(tuple->items[1]);
+                                if (pm_mode != WIFI_PS_MAX_MODEM) {
+                                    mp_raise_ValueError(NULL);
+                                }
+                            } else {
+                                mp_raise_ValueError(NULL);
+                            }
+                        }
+                        esp_exceptions(esp_wifi_set_ps((wifi_ps_type_t)pm_mode));
                         break;
                     }
                     default:
