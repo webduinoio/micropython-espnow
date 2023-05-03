@@ -349,164 +349,164 @@ STATIC mp_obj_t esp_config(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs
 
     int req_if = -1;
 
-    if (kwargs->used != 0) {
-
-        for (mp_uint_t i = 0; i < kwargs->alloc; i++) {
-            if (mp_map_slot_is_filled(kwargs, i)) {
-                switch (mp_obj_str_get_qstr(kwargs->table[i].key)) {
-                    case MP_QSTR_mac: {
-                        mp_buffer_info_t bufinfo;
-                        mp_get_buffer_raise(kwargs->table[i].value, &bufinfo, MP_BUFFER_READ);
-                        if (bufinfo.len != 6) {
-                            mp_raise_ValueError(MP_ERROR_TEXT("invalid buffer length"));
-                        }
-                        wifi_set_macaddr(self->if_id, bufinfo.buf);
-                        break;
-                    }
-                    case MP_QSTR_ssid:
-                    case MP_QSTR_essid: {
-                        req_if = SOFTAP_IF;
-                        size_t len;
-                        const char *s = mp_obj_str_get_data(kwargs->table[i].value, &len);
-                        len = MIN(len, sizeof(cfg.ap.ssid));
-                        memcpy(cfg.ap.ssid, s, len);
-                        cfg.ap.ssid_len = len;
-                        break;
-                    }
-                    case MP_QSTR_hidden: {
-                        req_if = SOFTAP_IF;
-                        cfg.ap.ssid_hidden = mp_obj_is_true(kwargs->table[i].value);
-                        break;
-                    }
-                    case MP_QSTR_security:
-                    case MP_QSTR_authmode: {
-                        req_if = SOFTAP_IF;
-                        cfg.ap.authmode = mp_obj_get_int(kwargs->table[i].value);
-                        break;
-                    }
-                    case MP_QSTR_key:
-                    case MP_QSTR_password: {
-                        req_if = SOFTAP_IF;
-                        size_t len;
-                        const char *s = mp_obj_str_get_data(kwargs->table[i].value, &len);
-                        len = MIN(len, sizeof(cfg.ap.password) - 1);
-                        memcpy(cfg.ap.password, s, len);
-                        cfg.ap.password[len] = 0;
-                        break;
-                    }
-                    case MP_QSTR_channel: {
-                        req_if = SOFTAP_IF;
-                        cfg.ap.channel = mp_obj_get_int(kwargs->table[i].value);
-                        break;
-                    }
-                    case MP_QSTR_hostname:
-                    case MP_QSTR_dhcp_hostname: {
-                        // TODO: Deprecated. Use network.hostname(name) instead.
-                        size_t len;
-                        const char *str = mp_obj_str_get_data(kwargs->table[i].value, &len);
-                        if (len >= MICROPY_PY_NETWORK_HOSTNAME_MAX_LEN) {
-                            mp_raise_ValueError(NULL);
-                        }
-                        strcpy(mod_network_hostname, str);
-                        break;
-                    }
-                    case MP_QSTR_protocol: {
-                        wifi_set_phy_mode(mp_obj_get_int(kwargs->table[i].value));
-                        break;
-                    }
-                    case MP_QSTR_txpower: {
-                        int8_t power = mp_obj_get_float(kwargs->table[i].value) * 4;
-                        system_phy_set_max_tpw(power);
-                        break;
-                    }
-                    case MP_QSTR_pm: {
-                        wifi_set_sleep_type(mp_obj_get_int(kwargs->table[i].value));
-                        break;
-                    }
-                    default:
-                        goto unknown;
-                }
+    mp_obj_t key;
+    mp_obj_t val = NULL;
+    for (mp_uint_t i = 0; i <= kwargs->alloc; i++) {
+        if (i < kwargs->alloc) {
+            // Keyword arguments provided
+            if (!mp_map_slot_is_filled(kwargs, i)) {
+                continue;
+            }
+            key = kwargs->table[i].key;
+            val = kwargs->table[i].value;
+        } else {
+            // Get config: Process non-keyword arguments
+            if (n_args == 2) {
+                key = args[1];
+                val = MP_OBJ_NULL;
+            } else if (n_args < 2) {
+                break;  // No arguments provided
+            } else {
+                mp_raise_TypeError(MP_ERROR_TEXT("can query only one param"));
             }
         }
 
-        // We post-check interface requirements to save on code size
-        if (req_if >= 0) {
-            require_if(args[0], req_if);
+        switch (mp_obj_str_get_qstr(key)) {
+            case MP_QSTR_mac: {
+                if (val) {
+                    mp_buffer_info_t bufinfo;
+                    mp_get_buffer_raise(val, &bufinfo, MP_BUFFER_READ);
+                    if (bufinfo.len != 6) {
+                        mp_raise_ValueError(MP_ERROR_TEXT("invalid buffer length"));
+                    }
+                    wifi_set_macaddr(self->if_id, bufinfo.buf);
+                } else {
+                    uint8_t mac[6];
+                    wifi_get_macaddr(self->if_id, mac);
+                    val = mp_obj_new_bytes(mac, sizeof(mac));
+                }
+                break;
+            }
+            case MP_QSTR_ssid:
+            case MP_QSTR_essid: {
+                if (val) {
+                    req_if = SOFTAP_IF;
+                    size_t len;
+                    const char *s = mp_obj_str_get_data(val, &len);
+                    len = MIN(len, sizeof(cfg.ap.ssid));
+                    memcpy(cfg.ap.ssid, s, len);
+                    cfg.ap.ssid_len = len;
+                } else {
+                    if (self->if_id == STATION_IF) {
+                        val = mp_obj_new_str((char *)cfg.sta.ssid, strlen((char *)cfg.sta.ssid));
+                    } else {
+                        val = mp_obj_new_str((char *)cfg.ap.ssid, cfg.ap.ssid_len);
+                    }
+                }
+                break;
+            }
+            case MP_QSTR_hidden: {
+                req_if = SOFTAP_IF;
+                if (val) {
+                    cfg.ap.ssid_hidden = mp_obj_is_true(val);
+                } else {
+                    val = mp_obj_new_bool(cfg.ap.ssid_hidden);
+                }
+                break;
+            }
+            case MP_QSTR_security:
+            case MP_QSTR_authmode: {
+                req_if = SOFTAP_IF;
+                if (val) {
+                    cfg.ap.authmode = mp_obj_get_int(val);
+                } else {
+                    val = MP_OBJ_NEW_SMALL_INT(cfg.ap.authmode);
+                }
+                break;
+            }
+            case MP_QSTR_key:
+            case MP_QSTR_password: {
+                if (val) {
+                    req_if = SOFTAP_IF;
+                    size_t len;
+                    const char *s = mp_obj_str_get_data(val, &len);
+                    len = MIN(len, sizeof(cfg.ap.password) - 1);
+                    memcpy(cfg.ap.password, s, len);
+                    cfg.ap.password[len] = 0;
+                }
+                break;
+            }
+            case MP_QSTR_channel: {
+                req_if = SOFTAP_IF;
+                if (val) {
+                    cfg.ap.channel = mp_obj_get_int(val);
+                } else {
+                    val = MP_OBJ_NEW_SMALL_INT(cfg.ap.channel);
+                }
+                break;
+            }
+            case MP_QSTR_hostname:
+            case MP_QSTR_dhcp_hostname: {
+                // TODO: Deprecated. Use network.hostname(name) instead.
+                if (val) {
+                    size_t len;
+                    const char *str = mp_obj_str_get_data(val, &len);
+                    if (len >= MICROPY_PY_NETWORK_HOSTNAME_MAX_LEN) {
+                        mp_raise_ValueError(NULL);
+                    }
+                    strcpy(mod_network_hostname, str);
+                } else {
+                    req_if = STATION_IF;
+                    // TODO: Deprecated. Use network.hostname() instead.
+                    val = mp_obj_new_str(mod_network_hostname, strlen(mod_network_hostname));
+                }
+                break;
+            }
+            case MP_QSTR_protocol: {
+                if (val) {
+                    wifi_set_phy_mode(mp_obj_get_int(val));
+                } else {
+                    val = mp_obj_new_int(wifi_get_phy_mode());
+                }
+                break;
+            }
+            case MP_QSTR_txpower: {
+                if (val) {
+                    int8_t power = mp_obj_get_float(val) * 4;
+                    system_phy_set_max_tpw(power);
+                }
+                break;
+            }
+            case MP_QSTR_pm: {
+                if (val) {
+                    wifi_set_sleep_type(mp_obj_get_int(val));
+                } else {
+                    val = MP_OBJ_NEW_SMALL_INT(wifi_get_sleep_type());
+                }
+                break;
+            }
+            default:
+                mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
         }
+    }
 
+    // Post-check interface requirements to save on code size
+    if (req_if >= 0) {
+        require_if(args[0], req_if);
+    }
+
+    if (kwargs->used != 0) {
+        // Set the updated wifi configuration: WLAN.config(option=...)
         if (self->if_id == STATION_IF) {
             error_check(wifi_station_set_config(&cfg.sta), "can't set STA config");
         } else {
             error_check(wifi_softap_set_config(&cfg.ap), "can't set AP config");
         }
-
         return mp_const_none;
+    } else {
+        // Return the value of the option requested: WLAN.config("option")
+        return val;
     }
-
-    // Get config
-
-    if (n_args != 2) {
-        mp_raise_TypeError(MP_ERROR_TEXT("can query only one param"));
-    }
-
-    mp_obj_t val;
-
-    qstr key = mp_obj_str_get_qstr(args[1]);
-    switch (key) {
-        case MP_QSTR_mac: {
-            uint8_t mac[6];
-            wifi_get_macaddr(self->if_id, mac);
-            return mp_obj_new_bytes(mac, sizeof(mac));
-        }
-        case MP_QSTR_ssid:
-        case MP_QSTR_essid:
-            if (self->if_id == STATION_IF) {
-                val = mp_obj_new_str((char *)cfg.sta.ssid, strlen((char *)cfg.sta.ssid));
-            } else {
-                val = mp_obj_new_str((char *)cfg.ap.ssid, cfg.ap.ssid_len);
-            }
-            break;
-        case MP_QSTR_hidden:
-            req_if = SOFTAP_IF;
-            val = mp_obj_new_bool(cfg.ap.ssid_hidden);
-            break;
-        case MP_QSTR_security:
-        case MP_QSTR_authmode:
-            req_if = SOFTAP_IF;
-            val = MP_OBJ_NEW_SMALL_INT(cfg.ap.authmode);
-            break;
-        case MP_QSTR_channel:
-            req_if = SOFTAP_IF;
-            val = MP_OBJ_NEW_SMALL_INT(cfg.ap.channel);
-            break;
-        case MP_QSTR_hostname:
-        case MP_QSTR_dhcp_hostname: {
-            req_if = STATION_IF;
-            // TODO: Deprecated. Use network.hostname() instead.
-            val = mp_obj_new_str(mod_network_hostname, strlen(mod_network_hostname));
-            break;
-        }
-        case MP_QSTR_protocol: {
-            val = mp_obj_new_int(wifi_get_phy_mode());
-            break;
-        }
-        case MP_QSTR_pm: {
-            val = MP_OBJ_NEW_SMALL_INT(wifi_get_sleep_type());
-            break;
-        }
-        default:
-            goto unknown;
-    }
-
-    // We post-check interface requirements to save on code size
-    if (req_if >= 0) {
-        require_if(args[0], req_if);
-    }
-
-    return val;
-
-unknown:
-    mp_raise_ValueError(MP_ERROR_TEXT("unknown config param"));
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_KW(esp_config_obj, 1, esp_config);
 
