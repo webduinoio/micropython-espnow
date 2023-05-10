@@ -383,9 +383,15 @@ after reboot/reset). This reduces the reliability of receiving ESP-NOW messages
 Peer Management
 ---------------
 
-The Espressif ESP-Now software requires that other devices (peers) must be
-*registered* before we can `send()<ESPNow.send()>` them messages. It is
-**not** necessary to *register* a peer to receive a message from that peer.
+On ESP32 devices, the Espressif ESP-Now software requires that other devices
+(peers) must be *registered* using `add_peer()` before we can
+`send()<ESPNow.send()>` them messages (this is *not* enforced on ESP8266
+devices). It is **not** necessary to register a peer to receive an
+un-encrypted message from that peer.
+
+**Encrypted messages**: To receive an *encrypted* message, the receiving device
+must first register the sender and use the same encryption keys as the sender
+(PMK and LMK) (see `set_pmk()` and `add_peer()`.
 
 .. method:: ESPNow.set_pmk(pmk)
 
@@ -415,8 +421,9 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 .. method:: ESPNow.add_peer(mac, [lmk], [channel], [ifidx], [encrypt])
             ESPNow.add_peer(mac, param=value, ...)   (ESP32 only)
 
-    Add/register the provided *mac* address as a peer. Additional parameters
-    may also be specified as positional or keyword arguments:
+    Add/register the provided *mac* address as a peer. Additional parameters may
+    also be specified as positional or keyword arguments (any parameter set to
+    ``None`` will be set to it's default value):
 
     .. data:: Arguments:
 
@@ -444,7 +451,7 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
         - *encrypt*: (ESP32 only) If set to ``True`` data exchanged with
           this peer will be encrypted with the PMK and LMK. (default =
-          ``False``)
+          ``True`` if *lmk* is set to a valid key, else ``False``)
 
         **ESP8266**: Keyword args may not be used on the ESP8266.
 
@@ -515,7 +522,8 @@ The Espressif ESP-Now software requires that other devices (peers) must be
 
     Modify the parameters of the peer associated with the provided *mac*
     address. Parameters may be provided as positional or keyword arguments
-    (see `ESPNow.add_peer()`).
+    (see `ESPNow.add_peer()`). Any parameter that is not set (or set to
+    ``None``) will retain the existing value for that parameter.
 
 Callback Methods
 ----------------
@@ -524,11 +532,17 @@ Callback Methods
 
   Set a callback function to be called *as soon as possible* after a message has
   been received from another ESPNow device. The callback function will be called
-  with the `ESPNow` instance object as an argument, eg: ::
+  with the `ESPNow` instance object as an argument. For more reliable operation,
+  it is recommended to read out as many messages as are available when the
+  callback is invoked and to set the read timeout to zero, eg: ::
 
-          def recv_cb(e):
-              print(e.irecv(0))
-          e.irq(recv_cb)
+        def recv_cb(e):
+            while True:  # Read out all messages waiting in the buffer
+                mac, msg = e.irecv(0)  # Don't wait if no messages left
+                if mac is None:
+                    return
+                print(mac, msg)
+        e.irq(recv_cb)
 
   The `irq()<ESPNow.irq()>` callback method is an alternative method for
   processing incoming espnow messages, especially if the data rate is moderate
@@ -739,7 +753,9 @@ point. When an ESP32 or ESP8266 device connects to a Wifi Access Point (see
 `ESP32 Quickref <../esp32/quickref.html#networking>`__) the following things
 happen which affect ESPNow communications:
 
-1. Wifi Power-saving Mode is automatically activated and
+1. Wifi Power-saving Mode (
+   `WLAN.config(pm=WLAN.PM_PERFORMANCE<network.WLAN.PM_PERFORMANCE>`)
+   is automatically activated and
 2. The radio on the esp device changes wifi ``channel`` to match the channel
    used by the Access Point.
 
@@ -750,17 +766,21 @@ device to turn off the radio periodically (typically for hundreds of
 milliseconds), making it unreliable in receiving ESPNow messages. This can be
 resolved by either of:
 
-1. Turning on the AP_IF interface, which will disable the power saving mode.
+1. Disabling the power-saving mode on the STA_IF interface;
+
+   - Use ``sta.config(pm=sta.PM_NONE)``
+
+2. Turning on the AP_IF interface, which will disable the power saving mode.
    However, the device will then be advertising an active wifi access point.
 
    - You **may** also choose to send your messages via the AP_IF interface, but
      this is not necessary.
    - ESP8266 peers must send messages to this AP_IF interface (see below).
 
-2. Configuring ESPNow clients to retry sending messages.
+3. Configuring ESPNow clients to retry sending messages.
 
 **Receiving messages from an ESP8266 device:** Strangely, an ESP32 device
-connected to a wifi network using method 1 or 2 above, will receive ESP-Now
+connected to a wifi network using method 1 or 2 above, will receive ESP-NOW
 messages sent to the STA_IF MAC address from another ESP32 device, but will
 **reject** messages from an ESP8266 device!!!. To receive messages from an
 ESP8266 device, the AP_IF interface must be set to ``active(True)`` **and**
@@ -780,6 +800,7 @@ espnow:
   sta.connect('myssid', 'mypassword')
   while not sta.isconnected():  # Wait until connected...
       time.sleep(0.1)
+  sta.config(pm=sta.PM_NONE)  # ..then disable power saving
   ap.active(True)         # Disable power-saving mode
 
   # Print the wifi channel used AFTER finished connecting to access point
