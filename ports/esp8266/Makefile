@@ -171,7 +171,6 @@ SHARED_SRC_C = $(addprefix shared/,\
 
 DRIVERS_SRC_C = $(addprefix drivers/,\
 	bus/softspi.c \
-	dht/dht.c \
         )
 
 SRC_S = \
