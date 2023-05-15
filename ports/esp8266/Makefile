@@ -114,6 +114,7 @@ SRC_C = \
 	fatfs_port.c \
 	posix_helpers.c \
 	hspi.c \
+	modir.c \
 	$(wildcard $(BOARD_DIR)/*.c) \
 	$(SRC_MOD)
 
