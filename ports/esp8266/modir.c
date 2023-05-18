@@ -35,6 +35,7 @@
 #include "py/mperrno.h"
 #include "py/mphal.h"
 #include "py/runtime.h"
+#include "modmachine.h"
 
 static uint32_t _frc1_ticks;
 static uint16_t _gpio_pin_num;
@@ -134,13 +135,14 @@ LOCAL void ICACHE_FLASH_ATTR send_code_task(void *arg) {
     ir_remote_send_nec(ir_data, 32); // power on/off code for Yamaha RX-700
 }
 
-STATIC mp_obj_t init() {
-    ir_remote_init(PERIPHS_IO_MUX_GPIO2_U, FUNC_GPIO2, 2, true);
+STATIC mp_obj_t init(mp_obj_t pin) {
+    const pyb_pin_obj_t *self = &pyb_pin_obj[mp_obj_get_int(pin)];
+    ir_remote_init(self->periph, self->func, self->phys_port, true);
     os_timer_disarm(&timer);
     os_timer_setfn(&timer, (os_timer_func_t *)send_code_task, (void *)0);
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_0(init_obj, init);
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(init_obj, init);
 
 STATIC mp_obj_t send_nec(mp_obj_t data) {
     ir_data = mp_obj_get_int(data);
